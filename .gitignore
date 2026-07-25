@@ -1,0 +1,23 @@
+# Secrets — NEVER commit these
+.env
+
+# Database (local player data)
+players.db
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
