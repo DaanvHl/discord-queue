@@ -73,10 +73,11 @@ MAPS = {
     ],
     "6v6": [
         "Sandal", "Garder", "Zone", "Fort Knox", "Station", "Cross",
+        "Siege", "Forest", "Red Alert",
     ],
     "7v7": [
         "Station", "Molotov", "Red Alert", "Fort Knox",
-        "Future", "Noise", "Iran",
+        "Future", "Noise", "Iran", "Siege", "Forest",
     ],
     "8v8": [
         "Noise", "Station", "Molotov", "Red Alert",
