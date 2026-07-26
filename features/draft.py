@@ -25,13 +25,13 @@ def get_draft_list(draft):
     )
 
 
-async def start_map_ban(channel, mode):
-    """Run the interactive 3-map ban between the two captains."""
-    maps = random.sample(MAPS[mode], 3)
+async def start_map_ban(channel, mode, first_banner, second_banner, on_complete):
+    """Run the interactive 3-map ban between two captains, then call on_complete(map).
 
-    match = active_matches[channel.id]
-    red_captain = match["captain1"]
-    blue_captain = match["captain2"]
+    first_banner bans first, second_banner second. Sides (red/blue) aren't decided
+    yet at this point, so captains are referred to by name only.
+    """
+    maps = random.sample(MAPS[mode], 3)
 
     class MapBanView(discord.ui.View):
         def __init__(self):
@@ -58,7 +58,7 @@ async def start_map_ban(channel, mode):
                 self.add_item(button)
 
         async def ban_map(self, interaction, selected_map):
-            captain = red_captain if self.turn == 0 else blue_captain
+            captain = first_banner if self.turn == 0 else second_banner
 
             if interaction.user.id != captain.id:
                 await interaction.response.send_message(
@@ -79,21 +79,20 @@ async def start_map_ban(channel, mode):
                 self.create_buttons()
                 await self.update_message(
                     f"🚫 **{get_player_name(interaction.user)} banned {selected_map}**\n\n"
-                    f"🔵 **{get_player_name(blue_captain)}** bans next."
+                    f"⚔️ **{get_player_name(second_banner)}** bans next."
                 )
             else:
                 winner = self.maps[0]
-                active_matches[channel.id]["map"] = winner
 
                 for item in self.children:
                     item.disabled = True
 
                 await self.update_message(
                     f"🚫 **{get_player_name(interaction.user)} banned {selected_map}**\n\n"
-                    f"🗺️ **Map Selected: {winner}**\n\n"
-                    f"🎮 **Match Ready!**"
+                    f"🗺️ **Map Selected: {winner}**"
                 )
                 self.stop()
+                await on_complete(winner)
 
         async def update_message(self, extra):
             embed = discord.Embed(
@@ -119,29 +118,27 @@ async def start_map_ban(channel, mode):
             if len(self.maps) <= 1:
                 return
 
-            captain = red_captain if self.turn == 0 else blue_captain
-            banned = random.choice(self.maps)
-            self.maps.remove(banned)
-            self.banned.append(banned)
-
-            if self.turn == 0:
+            # The view is now dead, so no more clicks will come — resolve every
+            # remaining ban randomly and finish.
+            notes = []
+            while len(self.maps) > 1:
+                captain = first_banner if self.turn == 0 else second_banner
+                banned = random.choice(self.maps)
+                self.maps.remove(banned)
+                self.banned.append(banned)
+                notes.append(
+                    f"⏰ **{get_player_name(captain)} timed out** — random ban: {banned}"
+                )
                 self.turn = 1
-                self.create_buttons()
-                await self.update_message(
-                    f"⏰ **{get_player_name(captain)} timed out.**\n"
-                    f"🚫 Random ban: {banned}\n\n"
-                    f"🔵 **{get_player_name(blue_captain)} bans next.**"
-                )
-            else:
-                winner = self.maps[0]
-                active_matches[channel.id]["map"] = winner
-                await self.update_message(
-                    f"⏰ **{get_player_name(captain)} timed out.**\n"
-                    f"🚫 Random ban: {banned}\n\n"
-                    f"🗺️ **Map Selected: {winner}**\n"
-                    f"🎮 **Match Ready!**"
-                )
-                self.stop()
+
+            for item in self.children:
+                item.disabled = True
+
+            winner = self.maps[0]
+            await self.update_message(
+                "\n".join(notes) + f"\n\n🗺️ **Map Selected: {winner}**"
+            )
+            await on_complete(winner)
 
     view = MapBanView()
 
@@ -156,7 +153,7 @@ async def start_map_ban(channel, mode):
     )
     embed.add_field(
         name="Status",
-        value=f"🔴 **{get_player_name(red_captain)}** bans first.",
+        value=f"⚔️ **{get_player_name(first_banner)}** bans first.",
         inline=False,
     )
 
@@ -240,13 +237,15 @@ def setup(bot):
             return
 
         # Draft finished (the last player may have been auto-assigned above).
+        # The map was already decided before the draft, so carry it into the match.
+        game_map = draft.get("map")
         active_matches[interaction.channel.id] = {
             "mode": draft["mode"],
             "team1": draft["team1"],
             "team2": draft["team2"],
             "captain1": draft["captain1"],
             "captain2": draft["captain2"],
-            "map": None,
+            "map": game_map,
         }
         drafts.pop(draft["mode"], None)
 
@@ -256,8 +255,7 @@ def setup(bot):
                 f"\n🤖 {get_player_name(auto_assigned)} was auto-assigned "
                 f"(last remaining player)."
             )
+        map_line = f"\n🗺️ Map: **{game_map}**" if game_map else ""
         await interaction.response.send_message(
-            f"{pick_msg}\n\n🏆 Teams are complete!\n\n{get_draft_list(draft)}"
+            f"{pick_msg}\n\n🏆 Teams are complete!{map_line}\n\n{get_draft_list(draft)}"
         )
-
-        await start_map_ban(interaction.channel, draft["mode"])

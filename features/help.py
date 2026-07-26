@@ -38,11 +38,12 @@ TOPICS = {
         [
             ("/captain", "Claim a captain slot. Only works right after your queue fills, "
                          "and only for players in that match. Max 2."),
-            ("/uncaptain", "Give up your slot before the draft starts."),
-            ("Team pick", "Once two captains are set, the **first** captain picks a side "
-                          "(🔴 Red / 🔵 Blue). The other side goes to the second captain."),
-            ("First pick", "As compensation, the **second** captain (who didn't pick the side) "
-                           "gets **first pick** in the player draft."),
+            ("/uncaptain", "Give up your slot (before the map ban starts)."),
+            ("1. Map ban", "As soon as both captains lock in, they ban maps first (`/help maps`)."),
+            ("2. Team pick", "The **first** captain picks a side (🔴 Red / 🔵 Blue); the other "
+                             "side goes to the second captain."),
+            ("3. First pick", "As compensation, the **second** captain gets **first pick** in "
+                              "the player draft."),
         ],
     ),
     "draft": (
@@ -52,15 +53,16 @@ TOPICS = {
             ("/pick `<player name>`", "Pick an available player onto your team (use their registered name)."),
             ("Turn order", "The captain with first pick starts (see `/help captains`), then it alternates."),
             ("Auto-assign", "When only one player is left, they're placed automatically — no final pick needed."),
-            ("Next step", "Once teams are complete, the map-ban phase starts (`/help maps`)."),
+            ("Next step", "The map was already chosen earlier, so once teams are complete the match is ready to play."),
         ],
     ),
     "maps": (
         "🗺️ Map Ban",
-        "Each match narrows 3 random maps down to 1.",
+        "Each match narrows 3 random maps down to 1 — right after captains are chosen, "
+        "before teams are picked.",
         [
-            ("How it works", "The bot picks **3 random maps** for the mode. Red bans one, then Blue "
-                             "bans one. The **remaining map is played**."),
+            ("How it works", "The bot picks **3 random maps** for the mode. The **first** captain "
+                             "bans one, then the **second**; the **remaining map is played**."),
             ("Buttons", "Bans are done by clicking the map buttons — only the captain whose turn it "
                         "is can ban."),
             ("Timeout", "Each captain has **60 seconds**; if they don't act, a random map is banned "

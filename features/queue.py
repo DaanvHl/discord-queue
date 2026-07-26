@@ -15,7 +15,7 @@ from discord import app_commands
 from checks import ensure_queue_channel
 from config import GAME_MODES
 from db import get_player_name, is_registered
-from features.draft import get_draft_list
+from features.draft import get_draft_list, start_map_ban
 from state import drafts, lobbies, queues
 
 MODE_CHOICES = [
@@ -65,6 +65,7 @@ def _begin_draft(mode, red_captain, blue_captain, first_picker):
         "team2": [blue_captain],
         "remaining": remaining,
         "turn": turn,
+        "map": lobby.get("map"),
     }
 
     first_marker = "🔴" if first_picker == red_captain else "🔵"
@@ -87,6 +88,8 @@ def _begin_draft(mode, red_captain, blue_captain, first_picker):
         value=f"{first_marker} {get_player_name(first_picker)}",
         inline=False,
     )
+    if drafts[mode].get("map"):
+        embed.add_field(name="🗺️ Map", value=drafts[mode]["map"], inline=False)
     embed.add_field(
         name="📋 Draft Status",
         value=get_draft_list(drafts[mode]),
@@ -234,6 +237,8 @@ def setup(bot):
             "mode": mode.value,
             "players": queue.copy(),
             "captains": [],
+            "map": None,
+            "locked": False,
         }
         queue.clear()
         await interaction.response.send_message(embed=_lobby_full_embed(mode.value))
@@ -297,19 +302,32 @@ def setup(bot):
             )
             return
 
-        # Both captains set: the first captain picks a side, the second gets first pick.
-        picker, other = lobby["captains"][0], lobby["captains"][1]
-        view = _TeamSelectView(lobby["mode"], picker, other)
-        embed = discord.Embed(
-            title="🎽 Pick a Team",
-            description=(
-                f"👑 **{get_player_name(picker)}**, choose your side.\n"
-                f"🎯 **{get_player_name(other)}** will get first pick in the draft."
-            ),
-            color=discord.Color.gold(),
+        # Both captains set. Lock the lobby and run the map ban first; the team pick
+        # and player draft follow once the map is decided.
+        lobby["locked"] = True
+        cap1, cap2 = lobby["captains"][0], lobby["captains"][1]
+        mode = lobby["mode"]
+        channel = interaction.channel
+
+        async def after_map_ban(selected_map):
+            lobby["map"] = selected_map
+            picker, other = lobby["captains"][0], lobby["captains"][1]
+            view = _TeamSelectView(mode, picker, other)
+            embed = discord.Embed(
+                title="🎽 Pick a Team",
+                description=(
+                    f"👑 **{get_player_name(picker)}**, choose your side.\n"
+                    f"🎯 **{get_player_name(other)}** will get first pick in the draft."
+                ),
+                color=discord.Color.gold(),
+            )
+            view.message = await channel.send(embed=embed, view=view)
+
+        await interaction.response.send_message(
+            f"👑 Captains locked in: **{get_player_name(cap1)}** & **{get_player_name(cap2)}**.\n"
+            f"🗺️ Map ban starting — **{get_player_name(cap1)}** bans first."
         )
-        await interaction.response.send_message(embed=embed, view=view)
-        view.message = await interaction.original_response()
+        await start_map_ban(channel, mode, cap1, cap2, after_map_ban)
 
     @bot.tree.command(name="uncaptain", description="Give up your captain slot before the draft starts")
     async def uncaptain(interaction: discord.Interaction):
@@ -322,6 +340,13 @@ def setup(bot):
         if lobby is None or user not in lobby["captains"]:
             await interaction.response.send_message(
                 "❌ You are not a captain in an active selection.",
+                ephemeral=True,
+            )
+            return
+
+        if lobby.get("locked"):
+            await interaction.response.send_message(
+                "❌ The match has already started — captains can no longer change.",
                 ephemeral=True,
             )
             return
