@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Queue Stats — Leaderboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #10141B;
+    --panel: #171D26;
+    --panel-2: #1D2530;
+    --border: #2A3542;
+    --accent: #F0A63A;
+    --accent-2: #3FA9A0;
+    --danger: #D9614F;
+    --text: #EDEAE2;
+    --text-muted: #8B93A1;
+    /* Tier colours mirror ranks.py */
+    --tier-iron: #9E9E9E;
+    --tier-bronze: #CD7F32;
+    --tier-silver: #C0C0C0;
+    --tier-gold: #FFD700;
+    --tier-platinum: #4FD1C5;
+    --tier-diamond: #4AA8FF;
+    --tier-emerald: #2ECC71;
+    --tier-ruby: #E0115F;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(ellipse at top left, rgba(240,166,58,0.05), transparent 40%),
+      radial-gradient(ellipse at bottom right, rgba(63,169,160,0.05), transparent 40%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    min-height:100vh;
+  }
+  .mono{font-family:'JetBrains Mono', monospace;}
+
+  header.top{
+    border-bottom:1px solid var(--border);
+    background:rgba(23,29,38,0.7);
+    backdrop-filter:blur(8px);
+    position:sticky; top:0; z-index:20;
+  }
+  .top-inner{
+    max-width:1100px; margin:0 auto; padding:18px 24px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-badge{width:34px; height:34px; flex-shrink:0;}
+  .brand-name{font-family:'Barlow Condensed', sans-serif; font-weight:700; font-size:22px; letter-spacing:0.03em; text-transform:uppercase;}
+  .brand-sub{font-size:11px; color:var(--text-muted); font-family:'JetBrains Mono', monospace; letter-spacing:0.08em; margin-top:-2px;}
+
+  nav.tabs{display:flex; gap:4px; flex-wrap:wrap;}
+  nav.tabs button{
+    background:none; border:1px solid transparent; color:var(--text-muted);
+    font-family:'Barlow Condensed', sans-serif; text-transform:uppercase; letter-spacing:0.04em;
+    font-size:15px; font-weight:600; padding:9px 14px; border-radius:6px; cursor:pointer;
+    transition:color .15s ease, background .15s ease, border-color .15s ease;
+  }
+  nav.tabs button:hover{color:var(--text); background:rgba(255,255,255,0.04);}
+  nav.tabs button.active{color:var(--bg); background:var(--accent); border-color:var(--accent);}
+
+  main{max-width:1100px; margin:0 auto; padding:32px 24px 80px;}
+  .view{display:none; animation:fadein .25s ease;}
+  .view.active{display:block;}
+  @keyframes fadein{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+  @media (prefers-reduced-motion: reduce){ .view{animation:none;} html{scroll-behavior:auto;} }
+
+  .section-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:12px;}
+  .section-title{font-family:'Barlow Condensed', sans-serif; font-size:28px; font-weight:700; text-transform:uppercase; letter-spacing:0.02em; margin:0;}
+  .section-eyebrow{font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--accent); letter-spacing:0.12em; text-transform:uppercase; margin:0 0 4px;}
+
+  .segmented{display:inline-flex; border:1px solid var(--border); border-radius:8px; padding:3px; gap:2px; background:var(--panel);}
+  .segmented button{
+    background:none; border:none; color:var(--text-muted); font-family:'JetBrains Mono', monospace;
+    font-size:12px; letter-spacing:0.05em; text-transform:uppercase; padding:7px 13px; border-radius:6px; cursor:pointer;
+    transition:color .15s ease, background .15s ease;
+  }
+  .segmented button:hover{color:var(--text);}
+  .segmented button.active{background:var(--panel-2); color:var(--accent); box-shadow: inset 0 0 0 1px var(--border);}
+
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  thead th{
+    text-align:left; padding:12px 16px; font-family:'JetBrains Mono', monospace; font-size:11px;
+    letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border);
+    background:var(--panel-2);
+  }
+  tbody td{padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:rgba(255,255,255,0.02);}
+  td.num, th.num{text-align:right; font-family:'JetBrains Mono', monospace;}
+  .rank-cell{font-family:'JetBrains Mono', monospace; color:var(--text-muted); width:36px;}
+  .empty{padding:28px 16px; text-align:center; color:var(--text-muted); font-family:'JetBrains Mono', monospace; font-size:13px;}
+
+  .player-row{display:flex; align-items:center; gap:10px;}
+  .hex{width:22px; height:22px; flex-shrink:0;
+    clip-path: polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%);}
+  .tier-label{font-size:11px; font-family:'JetBrains Mono', monospace; letter-spacing:0.04em; text-transform:uppercase;}
+
+  .wl{font-family:'JetBrains Mono', monospace; color:var(--text-muted); font-size:13px;}
+  .wl b{color:var(--text); font-weight:600;}
+  .wr-bar{width:70px; height:5px; border-radius:3px; background:var(--panel-2); overflow:hidden; margin-top:4px;}
+  .wr-fill{height:100%; background:var(--accent-2);}
+
+  .stat-card{padding:20px; border:1px solid var(--border); border-radius:10px; background:var(--panel);}
+  .stat-card h3{margin:0 0 14px; font-family:'Barlow Condensed', sans-serif; text-transform:uppercase; font-size:16px; letter-spacing:0.03em; color:var(--text-muted);}
+  .active-row{display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:13px;}
+  .active-row:last-child{border-bottom:none;}
+  .active-row .n{color:var(--text-muted); font-family:'JetBrains Mono', monospace; width:22px; display:inline-block;}
+
+  footer{max-width:1100px; margin:0 auto; padding:20px 24px 40px; color:var(--text-muted); font-size:12px; font-family:'JetBrains Mono', monospace; border-top:1px solid var(--border);}
+  ::selection{background:var(--accent); color:var(--bg);}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <svg class="brand-badge" viewBox="0 0 100 100">
+        <polygon points="50,3 95,26 95,74 50,97 5,74 5,26" fill="none" stroke="#F0A63A" stroke-width="4"/>
+        <polygon points="50,22 78,37 78,63 50,78 22,63 22,37" fill="#1D2530" stroke="#3FA9A0" stroke-width="2"/>
+        <circle cx="50" cy="50" r="7" fill="#F0A63A"/>
+      </svg>
+      <div>
+        <div class="brand-name">Queue Stats</div>
+        <div class="brand-sub">// LIVE LEADERBOARD</div>
+      </div>
+    </div>
+    <nav class="tabs" id="mainTabs">
+      <button data-view="leaderboard" class="active">Leaderboard</button>
+      <button data-view="serverstats">Server Stats</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- LEADERBOARD -->
+  <section class="view active" id="view-leaderboard">
+    <div class="section-head">
+      <div>
+        <p class="section-eyebrow">// Rank Standings</p>
+        <h2 class="section-title">Leaderboard</h2>
+      </div>
+      <div class="segmented" id="lbFormat">
+        <button data-fmt="small">Small 2v2–3v3</button>
+        <button data-fmt="medium" class="active">Medium 4v4–6v6</button>
+        <button data-fmt="large">Large 7v7–10v10</button>
+      </div>
+    </div>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th>Player</th>
+            <th>Rank</th>
+            <th class="num">Points</th>
+            <th>W / L / D</th>
+            <th>Win rate</th>
+          </tr>
+        </thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- SERVER STATS -->
+  <section class="view" id="view-serverstats">
+    <div class="section-head">
+      <div>
+        <p class="section-eyebrow">// Aggregate</p>
+        <h2 class="section-title">Server Stats</h2>
+      </div>
+    </div>
+    <div class="stat-card">
+      <h3>Most active — top 10</h3>
+      <div id="activeStats"></div>
+    </div>
+  </section>
+</main>
+
+<footer>Live data from the queue bot · auto-refreshes every 30s</footer>
+
+<script>
+const TIER_COLORS = {
+  Iron:'var(--tier-iron)', Bronze:'var(--tier-bronze)', Silver:'var(--tier-silver)',
+  Gold:'var(--tier-gold)', Platinum:'var(--tier-platinum)', Diamond:'var(--tier-diamond)',
+  Emerald:'var(--tier-emerald)', Ruby:'var(--tier-ruby)',
+};
+
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+function tierHex(tier){
+  const c = TIER_COLORS[tier] || 'var(--text-muted)';
+  return `<span class="hex" style="background:${c}22; box-shadow: inset 0 0 0 1.5px ${c};"></span>`;
+}
+
+let currentFmt = 'medium';
+
+async function loadLeaderboard(fmt){
+  currentFmt = fmt;
+  const body = document.getElementById('lbBody');
+  try{
+    const res = await fetch('/api/leaderboard?bracket=' + fmt);
+    const rows = await res.json();
+    if(!rows.length){
+      body.innerHTML = `<tr><td colspan="6" class="empty">No ranked players yet.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(r => {
+      const c = TIER_COLORS[r.tier] || 'var(--text-muted)';
+      return `<tr>
+        <td class="rank-cell">${r.rank}</td>
+        <td><div class="player-row">${tierHex(r.tier)}<span>${esc(r.player)}</span></div></td>
+        <td><span class="tier-label" style="color:${c}">${esc(r.tier)}</span></td>
+        <td class="num">${r.points}</td>
+        <td class="wl"><b>${r.w}</b> / ${r.l} / ${r.d}</td>
+        <td>
+          <div class="wl">${r.winrate}%</div>
+          <div class="wr-bar"><div class="wr-fill" style="width:${r.winrate}%"></div></div>
+        </td>
+      </tr>`;
+    }).join('');
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="6" class="empty">Could not load leaderboard.</td></tr>`;
+  }
+}
+
+async function loadActive(){
+  const el = document.getElementById('activeStats');
+  try{
+    const res = await fetch('/api/active');
+    const list = await res.json();
+    if(!list.length){ el.innerHTML = `<div class="empty">No games played yet.</div>`; return; }
+    el.innerHTML = list.map((a,i) => `
+      <div class="active-row">
+        <span><span class="n">${i+1}</span>${esc(a.player)}</span>
+        <span class="mono">${a.games} games</span>
+      </div>`).join('');
+  }catch(e){
+    el.innerHTML = `<div class="empty">Could not load stats.</div>`;
+  }
+}
+
+document.getElementById('mainTabs').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  document.querySelectorAll('#mainTabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+btn.dataset.view).classList.add('active');
+});
+
+document.getElementById('lbFormat').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  document.querySelectorAll('#lbFormat button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  loadLeaderboard(btn.dataset.fmt);
+});
+
+function refresh(){ loadLeaderboard(currentFmt); loadActive(); }
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

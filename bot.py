@@ -13,6 +13,7 @@ from discord.ext import commands
 from config import GUILD_ID, TOKEN
 from features import draft, help, matches, queue, registration, stats
 from ranks import ensure_rank_roles
+from web import start_web_server
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -20,6 +21,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Register every feature's commands.
 for feature in (registration, queue, draft, matches, stats, help):
     feature.setup(bot)
+
+
+async def setup_hook():
+    """Start the embedded leaderboard web server alongside the bot."""
+    try:
+        await start_web_server()
+    except Exception as exc:  # never let the web server break the bot
+        print(f"[web] failed to start web server: {exc}")
+
+
+bot.setup_hook = setup_hook
 
 
 @bot.event
