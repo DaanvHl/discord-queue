@@ -84,7 +84,7 @@ MAPS = {
     ],
     "9v9": [
         "Silence", "Red Alert", "Future", "Iran",
-        "Molotov", "Industrial Zone", "Polygon",
+        "Molotov", "Industrial Zone",
     ],
     "10v10": [
         "Silence", "Red Alert", "Future", "Iran",

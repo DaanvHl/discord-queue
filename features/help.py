@@ -39,8 +39,10 @@ TOPICS = {
             ("/captain", "Claim a captain slot. Only works right after your queue fills, "
                          "and only for players in that match. Max 2."),
             ("/uncaptain", "Give up your slot before the draft starts."),
-            ("First pick", "The **first** player to claim captain becomes Red Captain and picks first."),
-            ("Locked in", "Once both captains are set, the draft begins and captains can't change."),
+            ("Team pick", "Once two captains are set, the **first** captain picks a side "
+                          "(🔴 Red / 🔵 Blue). The other side goes to the second captain."),
+            ("First pick", "As compensation, the **second** captain (who didn't pick the side) "
+                           "gets **first pick** in the player draft."),
         ],
     ),
     "draft": (
@@ -48,7 +50,7 @@ TOPICS = {
         "Captains take turns picking players for their teams.",
         [
             ("/pick `<player name>`", "Pick an available player onto your team (use their registered name)."),
-            ("Turn order", "Red Captain picks first, then it alternates."),
+            ("Turn order", "The captain with first pick starts (see `/help captains`), then it alternates."),
             ("Auto-assign", "When only one player is left, they're placed automatically — no final pick needed."),
             ("Next step", "Once teams are complete, the map-ban phase starts (`/help maps`)."),
         ],

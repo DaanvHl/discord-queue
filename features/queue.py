@@ -42,24 +42,32 @@ def _lobby_full_embed(mode):
     return embed
 
 
-def _begin_draft(mode):
-    """Turn a lobby with two captains into a captain draft; return the draft embed."""
+def _begin_draft(mode, red_captain, blue_captain, first_picker):
+    """Turn a lobby into a captain draft with the chosen sides; return the draft embed.
+
+    red_captain / blue_captain are the assigned sides; first_picker (one of them)
+    takes the first player pick.
+    """
     lobby = lobbies.pop(mode)
     players = lobby["players"]
-    captain1, captain2 = lobby["captains"][0], lobby["captains"][1]
 
-    remaining = [p for p in players if p not in (captain1, captain2)]
+    remaining = [p for p in players if p not in (red_captain, blue_captain)]
     random.shuffle(remaining)
+
+    # team1 == red, team2 == blue; turn 1 means red picks, turn 2 means blue picks.
+    turn = 1 if first_picker == red_captain else 2
 
     drafts[mode] = {
         "mode": mode,
-        "captain1": captain1,
-        "captain2": captain2,
-        "team1": [captain1],
-        "team2": [captain2],
+        "captain1": red_captain,
+        "captain2": blue_captain,
+        "team1": [red_captain],
+        "team2": [blue_captain],
         "remaining": remaining,
-        "turn": 1,
+        "turn": turn,
     }
+
+    first_marker = "🔴" if first_picker == red_captain else "🔵"
 
     embed = discord.Embed(
         title=f"🏆 {mode} Match Ready!",
@@ -69,14 +77,14 @@ def _begin_draft(mode):
     embed.add_field(
         name="👑 Captains",
         value=(
-            f"🔴 **Red Captain:** {get_player_name(captain1)}\n"
-            f"🔵 **Blue Captain:** {get_player_name(captain2)}"
+            f"🔴 **Red Captain:** {get_player_name(red_captain)}\n"
+            f"🔵 **Blue Captain:** {get_player_name(blue_captain)}"
         ),
         inline=False,
     )
     embed.add_field(
         name="🎯 First Pick",
-        value=f"🔴 {get_player_name(captain1)}",
+        value=f"{first_marker} {get_player_name(first_picker)}",
         inline=False,
     )
     embed.add_field(
@@ -86,6 +94,69 @@ def _begin_draft(mode):
     )
     embed.set_footer(text="Use /pick PlayerName")
     return embed
+
+
+class _TeamSelectView(discord.ui.View):
+    """Lets the first captain pick a side; the other captain gets first pick."""
+
+    def __init__(self, mode, picker, other):
+        super().__init__(timeout=60)
+        self.mode = mode
+        self.picker = picker   # first captain — chooses the side
+        self.other = other     # second captain — gets first pick
+        self.message = None
+        self.done = False
+
+    async def _finish(self, color, interaction=None):
+        self.done = True
+        if color == "red":
+            red_captain, blue_captain = self.picker, self.other
+        else:
+            red_captain, blue_captain = self.other, self.picker
+
+        for item in self.children:
+            item.disabled = True
+
+        picker_marker = "🔴" if color == "red" else "🔵"
+        note = (
+            f"{picker_marker} **{get_player_name(self.picker)}** chose "
+            f"**{color.capitalize()}**.\n"
+            f"🎯 **{get_player_name(self.other)}** gets first pick."
+        )
+        draft_embed = _begin_draft(self.mode, red_captain, blue_captain, first_picker=self.other)
+
+        if interaction is not None:
+            await interaction.response.edit_message(content=note, embed=None, view=self)
+            await interaction.channel.send(embed=draft_embed)
+        elif self.message is not None:
+            await self.message.edit(content=note, embed=None, view=self)
+            await self.message.channel.send(embed=draft_embed)
+        self.stop()
+
+    @discord.ui.button(label="Red", style=discord.ButtonStyle.danger, emoji="🔴")
+    async def red(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._on_click(interaction, "red")
+
+    @discord.ui.button(label="Blue", style=discord.ButtonStyle.primary, emoji="🔵")
+    async def blue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._on_click(interaction, "blue")
+
+    async def _on_click(self, interaction, color):
+        if interaction.user.id != self.picker.id:
+            await interaction.response.send_message(
+                f"❌ Only {get_player_name(self.picker)} picks the team.",
+                ephemeral=True,
+            )
+            return
+        if self.done:
+            return
+        await self._finish(color, interaction)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        # Default: the picker takes Red.
+        await self._finish("red", interaction=None)
 
 
 def _find_player_lobby(user):
@@ -226,8 +297,19 @@ def setup(bot):
             )
             return
 
-        # Second captain locked in: start the draft.
-        await interaction.response.send_message(embed=_begin_draft(lobby["mode"]))
+        # Both captains set: the first captain picks a side, the second gets first pick.
+        picker, other = lobby["captains"][0], lobby["captains"][1]
+        view = _TeamSelectView(lobby["mode"], picker, other)
+        embed = discord.Embed(
+            title="🎽 Pick a Team",
+            description=(
+                f"👑 **{get_player_name(picker)}**, choose your side.\n"
+                f"🎯 **{get_player_name(other)}** will get first pick in the draft."
+            ),
+            color=discord.Color.gold(),
+        )
+        await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
 
     @bot.tree.command(name="uncaptain", description="Give up your captain slot before the draft starts")
     async def uncaptain(interaction: discord.Interaction):
