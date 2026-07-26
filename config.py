@@ -41,7 +41,9 @@ GAME_MODES = {
     "4v4": 8,
     "5v5": 10,
     "6v6": 12,
+    "7v7": 14,
     "8v8": 16,
+    "9v9": 18,
     "10v10": 20,
 }
 
@@ -50,7 +52,7 @@ BRACKETS = ("small", "medium", "large")
 BRACKET_LABELS = {
     "small": "Small (2v2–3v3)",
     "medium": "Medium (4v4–6v6)",
-    "large": "Large (8v8–10v10)",
+    "large": "Large (7v7–10v10)",
 }
 
 MAPS = {
@@ -72,9 +74,17 @@ MAPS = {
     "6v6": [
         "Sandal", "Garder", "Zone", "Fort Knox", "Station", "Cross",
     ],
+    "7v7": [
+        "Station", "Molotov", "Red Alert", "Fort Knox",
+        "Future", "Noise", "Iran",
+    ],
     "8v8": [
         "Noise", "Station", "Molotov", "Red Alert",
         "Future", "Polygon", "Iran",
+    ],
+    "9v9": [
+        "Silence", "Red Alert", "Future", "Iran",
+        "Molotov", "Industrial Zone", "Polygon",
     ],
     "10v10": [
         "Silence", "Red Alert", "Future", "Iran",

@@ -30,7 +30,7 @@ def _lobby_full_embed(mode):
         title=f"🏆 {mode} Queue Full!",
         description=(
             "Two players must claim captain to start the draft.\n"
-            f"Use `/captain {mode}` — first two to claim lead the teams."
+            "Use `/captain` — first two to claim lead the teams."
         ),
         color=discord.Color.gold(),
     )
@@ -86,6 +86,14 @@ def _begin_draft(mode):
     )
     embed.set_footer(text="Use /pick PlayerName")
     return embed
+
+
+def _find_player_lobby(user):
+    """Return the lobby (forming match) the user is part of, or None."""
+    for lobby in lobbies.values():
+        if user in lobby["players"]:
+            return lobby
+    return None
 
 
 def setup(bot):
@@ -180,25 +188,17 @@ def setup(bot):
             f"❌ Left **{current_mode}** ({len(queue)}/{GAME_MODES[current_mode]})"
         )
 
-    @bot.tree.command(name="captain", description="Claim a captain slot (only when a queue just filled)")
-    @app_commands.choices(mode=MODE_CHOICES)
-    async def captain(interaction: discord.Interaction, mode: app_commands.Choice[str]):
+    @bot.tree.command(name="captain", description="Claim a captain slot after your queue fills")
+    async def captain(interaction: discord.Interaction):
         if not await ensure_queue_channel(interaction):
             return
 
         user = interaction.user
-        lobby = lobbies.get(mode.value)
+        lobby = _find_player_lobby(user)
 
         if lobby is None:
             await interaction.response.send_message(
-                f"❌ Captains can only be chosen when a **{mode.value}** queue just filled.",
-                ephemeral=True,
-            )
-            return
-
-        if user not in lobby["players"]:
-            await interaction.response.send_message(
-                "❌ You are not part of this match.",
+                "❌ Captains can only be chosen right after your queue fills.",
                 ephemeral=True,
             )
             return
@@ -222,21 +222,20 @@ def setup(bot):
         if len(lobby["captains"]) < 2:
             await interaction.response.send_message(
                 f"👑 {get_player_name(user)} is captain (1/2).\n"
-                f"One more player must use `/captain {mode.value}`."
+                f"One more player must use `/captain`."
             )
             return
 
         # Second captain locked in: start the draft.
-        await interaction.response.send_message(embed=_begin_draft(mode.value))
+        await interaction.response.send_message(embed=_begin_draft(lobby["mode"]))
 
     @bot.tree.command(name="uncaptain", description="Give up your captain slot before the draft starts")
-    @app_commands.choices(mode=MODE_CHOICES)
-    async def uncaptain(interaction: discord.Interaction, mode: app_commands.Choice[str]):
+    async def uncaptain(interaction: discord.Interaction):
         if not await ensure_queue_channel(interaction):
             return
 
         user = interaction.user
-        lobby = lobbies.get(mode.value)
+        lobby = _find_player_lobby(user)
 
         if lobby is None or user not in lobby["captains"]:
             await interaction.response.send_message(
@@ -248,7 +247,7 @@ def setup(bot):
         lobby["captains"].remove(user)
         await interaction.response.send_message(
             f"✅ {get_player_name(user)} stepped down. "
-            f"A player must use `/captain {mode.value}` ({len(lobby['captains'])}/2)."
+            f"A player must use `/captain` ({len(lobby['captains'])}/2)."
         )
 
     @bot.tree.command(name="queues", description="View all queues")

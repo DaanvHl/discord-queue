@@ -36,9 +36,9 @@ TOPICS = {
         "👑 Captains",
         "When a queue fills, two players lead the teams.",
         [
-            ("/captain `<mode>`", "Claim a captain slot. Only works right after the queue fills, "
-                                  "and only for players in that match. Max 2."),
-            ("/uncaptain `<mode>`", "Give up your slot before the draft starts."),
+            ("/captain", "Claim a captain slot. Only works right after your queue fills, "
+                         "and only for players in that match. Max 2."),
+            ("/uncaptain", "Give up your slot before the draft starts."),
             ("First pick", "The **first** player to claim captain becomes Red Captain and picks first."),
             ("Locked in", "Once both captains are set, the draft begins and captains can't change."),
         ],
@@ -80,7 +80,7 @@ TOPICS = {
         f"Everyone starts at **{STARTING_POINTS}** points. Ratings are tracked **per section**, so "
         "you can be a different rank in each:",
         [
-            ("Sections", "🟢 **Small** (2v2–3v3) · 🟡 **Medium** (4v4–6v6) · 🔴 **Large** (8v8–10v10)"),
+            ("Sections", "🟢 **Small** (2v2–3v3) · 🟡 **Medium** (4v4–6v6) · 🔴 **Large** (7v7–10v10)"),
             ("Winning / losing", "Team-average Elo. Even match ≈ **+50** to win, **−45** to lose. Beating "
                                  "a **stronger** team earns more; a **weaker** team earns less (points "
                                  "grow slowly over time and never drop below 0)."),
