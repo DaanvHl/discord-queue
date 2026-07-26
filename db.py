@@ -1,8 +1,10 @@
 """Database access: schema/migration, player data, and the points/streak math."""
+import os
 import sqlite3
 
 from config import (
     BRACKETS,
+    DB_PATH,
     GAME_MODES,
     K_FACTOR,
     LOSS_RATIO,
@@ -14,7 +16,12 @@ from config import (
     STREAK_THRESHOLD,
 )
 
-db = sqlite3.connect("players.db")
+# Make sure the target directory exists (e.g. a mounted volume like /data).
+_db_dir = os.path.dirname(DB_PATH)
+if _db_dir:
+    os.makedirs(_db_dir, exist_ok=True)
+
+db = sqlite3.connect(DB_PATH)
 cursor = db.cursor()
 
 

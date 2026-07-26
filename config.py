@@ -17,6 +17,10 @@ TOKEN = _require("DISCORD_TOKEN")
 GUILD_ID = int(_require("GUILD_ID"))
 QUEUE_CHANNEL_ID = int(_require("QUEUE_CHANNEL_ID"))
 
+# Database file location. Defaults to a local file. When hosting, point this at a
+# persistent volume (e.g. DB_PATH=/data/players.db) so data survives redeploys.
+DB_PATH = os.getenv("DB_PATH", "players.db")
+
 # --- Points / rating configuration ---
 STARTING_POINTS = 1000
 K_FACTOR = 50        # Points a winner gains in a perfectly even match.
