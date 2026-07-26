@@ -4,6 +4,7 @@ import discord
 from checks import ensure_queue_channel
 from config import STARTING_POINTS
 from db import get_player_name, is_registered, register_player, rename_player
+from ranks import update_member_ranks
 
 
 def setup(bot):
@@ -34,6 +35,7 @@ def setup(bot):
             f"✅ Successfully registered as **{name}**!\n"
             f"You start with **{STARTING_POINTS}** points in every bracket."
         )
+        await update_member_ranks(interaction.guild, interaction.user)
 
     @bot.tree.command(name="rename", description="Change your registered name")
     async def rename(interaction: discord.Interaction, name: str):

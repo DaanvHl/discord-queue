@@ -13,6 +13,7 @@ from db import (
     is_registered,
     win_rate,
 )
+from ranks import rank_for_points
 
 BRACKET_CHOICES = [
     app_commands.Choice(name=BRACKET_LABELS[b], value=b) for b in BRACKETS
@@ -44,8 +45,9 @@ def setup(bot):
         bracket_lines = []
         for b in BRACKETS:
             wins, losses = get_bracket_record(user_id, b)
+            points = get_points(user_id, b)
             bracket_lines.append(
-                f"**{BRACKET_LABELS[b]}:** {get_points(user_id, b)} pts · "
+                f"**{BRACKET_LABELS[b]}:** {points} pts · {rank_for_points(points)} · "
                 f"{wins}W / {losses}L ({win_rate(wins, losses)}%)"
             )
         embed.add_field(name="🏅 Points & Record", value="\n".join(bracket_lines), inline=False)

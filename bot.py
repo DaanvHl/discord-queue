@@ -11,13 +11,14 @@ import discord
 from discord.ext import commands
 
 from config import GUILD_ID, TOKEN
-from features import draft, matches, queue, registration, stats
+from features import draft, help, matches, queue, registration, stats
+from ranks import ensure_rank_roles
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Register every feature's commands.
-for feature in (registration, queue, draft, matches, stats):
+for feature in (registration, queue, draft, matches, stats, help):
     feature.setup(bot)
 
 
@@ -30,6 +31,11 @@ async def on_ready():
     synced = await bot.tree.sync(guild=guild)
 
     print(f"Synced {len(synced)} commands")
+
+    real_guild = bot.get_guild(GUILD_ID)
+    if real_guild:
+        await ensure_rank_roles(real_guild)
+        print("Rank roles ensured")
 
 
 bot.run(TOKEN)

@@ -4,6 +4,7 @@ from discord import app_commands
 
 from checks import ensure_queue_channel
 from config import BRACKET_LABELS
+from ranks import update_member_ranks
 from db import (
     add_points,
     calculate_points_change,
@@ -156,12 +157,19 @@ def setup(bot):
             )
             return
 
-        summary = _apply_result(match, report["winner"])
+        outcome = report["winner"]
+        summary = _apply_result(match, outcome)
         commit()
 
+        players = match["team1"] + match["team2"]
         del pending_results[channel_id]
         del active_matches[channel_id]
 
         await interaction.response.send_message(
             f"✅ Result confirmed. Match closed.\n\n{summary}"
         )
+
+        # Sync rank roles after points change (skipped on draws — no points move).
+        if outcome != "draw":
+            for player in players:
+                await update_member_ranks(interaction.guild, player)

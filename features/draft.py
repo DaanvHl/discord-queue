@@ -217,6 +217,16 @@ def setup(bot):
 
         draft["remaining"].remove(player)
 
+        # If only one player would be left, their team is forced — auto-assign them
+        # to whoever's turn it is now, saving a pointless final /pick.
+        auto_assigned = None
+        if len(draft["remaining"]) == 1:
+            auto_assigned = draft["remaining"].pop()
+            if draft["turn"] == 1:
+                draft["team1"].append(auto_assigned)
+            else:
+                draft["team2"].append(auto_assigned)
+
         if draft["remaining"]:
             next_captain = (
                 draft["captain1"] if draft["turn"] == 1 else draft["captain2"]
@@ -229,7 +239,7 @@ def setup(bot):
             )
             return
 
-        # Draft finished.
+        # Draft finished (the last player may have been auto-assigned above).
         active_matches[interaction.channel.id] = {
             "mode": draft["mode"],
             "team1": draft["team1"],
@@ -240,8 +250,14 @@ def setup(bot):
         }
         drafts.pop(draft["mode"], None)
 
+        pick_msg = f"✅ {get_player_name(player)} was picked!"
+        if auto_assigned is not None:
+            pick_msg += (
+                f"\n🤖 {get_player_name(auto_assigned)} was auto-assigned "
+                f"(last remaining player)."
+            )
         await interaction.response.send_message(
-            f"🏆 Teams are complete!\n\n{get_draft_list(draft)}"
+            f"{pick_msg}\n\n🏆 Teams are complete!\n\n{get_draft_list(draft)}"
         )
 
         await start_map_ban(interaction.channel, draft["mode"])
