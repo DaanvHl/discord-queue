@@ -8,6 +8,10 @@ from config import GAME_MODES
 # Players waiting in each queue: {mode: [discord.User, ...]}
 queues = {mode: [] for mode in GAME_MODES}
 
+# Monotonic timestamp of the last time someone joined each queue, used to
+# auto-close queues that sit idle too long. {mode: float}
+queue_last_activity = {}
+
 # Full queues waiting for captains to be chosen, keyed by mode.
 # {mode: {"mode": str, "players": [users], "captains": [users]}}
 # A lobby exists only during the captain-selection window (after the queue fills,

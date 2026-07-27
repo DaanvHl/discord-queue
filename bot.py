@@ -24,11 +24,13 @@ for feature in (registration, queue, draft, matches, stats, help):
 
 
 async def setup_hook():
-    """Start the embedded leaderboard web server alongside the bot."""
+    """Start the embedded web server and background tasks alongside the bot."""
     try:
         await start_web_server()
     except Exception as exc:  # never let the web server break the bot
         print(f"[web] failed to start web server: {exc}")
+
+    queue.start_background_tasks(bot)
 
 
 bot.setup_hook = setup_hook

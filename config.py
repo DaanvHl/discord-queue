@@ -21,6 +21,9 @@ QUEUE_CHANNEL_ID = int(_require("QUEUE_CHANNEL_ID"))
 # persistent volume (e.g. DB_PATH=/data/players.db) so data survives redeploys.
 DB_PATH = os.getenv("DB_PATH", "players.db")
 
+# A non-full queue is auto-closed if nobody joins it for this long (seconds).
+QUEUE_INACTIVITY_SECONDS = 15 * 60
+
 # --- Points / rating configuration ---
 STARTING_POINTS = 1000
 K_FACTOR = 50        # Points a winner gains in a perfectly even match.
@@ -59,13 +62,16 @@ MAPS = {
     "2v2": [
         "Boombox", "Cross", "Duality", "Garder", "Sandal",
         "Sandbox", "Station", "Valley", "Zone", "Magadan",
+        "Short Bridge",
     ],
     "3v3": [
         "Boombox", "Cross", "Duality", "Garder", "Sandal",
         "Sandbox", "Station", "Valley", "Zone", "Magadan",
+        "Short Bridge",
     ],
     "4v4": [
         "Sandbox", "Sandal", "Pass", "Farm", "Boombox", "Magadan",
+        "Valley", "Short Bridge",
     ],
     "5v5": [
         "Cross", "Fort Knox", "Garder", "Sandal", "Molotov",
@@ -73,15 +79,15 @@ MAPS = {
     ],
     "6v6": [
         "Sandal", "Garder", "Zone", "Fort Knox", "Station", "Cross",
-        "Siege", "Forest", "Red Alert",
+        "Siege", "Forest", "Red Alert", "Courage",
     ],
     "7v7": [
         "Station", "Molotov", "Red Alert", "Fort Knox",
-        "Future", "Noise", "Iran", "Siege", "Forest",
+        "Future", "Noise", "Iran", "Siege", "Forest", "Courage",
     ],
     "8v8": [
         "Noise", "Station", "Molotov", "Red Alert",
-        "Future", "Polygon", "Iran",
+        "Future", "Polygon", "Iran", "Courage",
     ],
     "9v9": [
         "Silence", "Red Alert", "Future", "Iran",

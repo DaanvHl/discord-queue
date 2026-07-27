@@ -8,15 +8,17 @@ Match lifecycle for a mode:
   4. Once two captains are set, the draft starts and captains lock in.
 """
 import random
+import time
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from checks import ensure_queue_channel
-from config import GAME_MODES
+from config import GAME_MODES, QUEUE_CHANNEL_ID, QUEUE_INACTIVITY_SECONDS
 from db import get_player_name, is_registered
 from features.draft import get_draft_list, start_map_ban
-from state import drafts, lobbies, queues
+from state import drafts, lobbies, queue_last_activity, queues
 
 MODE_CHOICES = [
     app_commands.Choice(name=mode, value=mode) for mode in GAME_MODES
@@ -225,23 +227,27 @@ def setup(bot):
             return
 
         queue.append(user)
+        queue_last_activity[mode.value] = time.monotonic()
+
+        player_list = "\n".join(
+            f"{i}. {get_player_name(p)}" for i, p in enumerate(queue, 1)
+        )
 
         if len(queue) < size:
             await interaction.response.send_message(
-                f"✅ Joined **{mode.value}** queue ({len(queue)}/{size})"
+                f"✅ Joined **{mode.value}** queue ({len(queue)}/{size})\n\n"
+                f"**Players in queue:**\n{player_list}"
             )
             return
 
-        # Queue is full: form a lobby and ask for captains. No captains yet.
-        lobbies[mode.value] = {
-            "mode": mode.value,
-            "players": queue.copy(),
-            "captains": [],
-            "map": None,
-            "locked": False,
-        }
-        queue.clear()
-        await interaction.response.send_message(embed=_lobby_full_embed(mode.value))
+        # Queue is full — but don't start yet. Players can still /leave; any player
+        # in the queue runs /start to lock it and begin the match.
+        await interaction.response.send_message(
+            f"✅ Joined **{mode.value}** queue ({size}/{size})\n\n"
+            f"**Players in queue:**\n{player_list}\n\n"
+            f"🎉 **The {mode.value} queue is full!** Any player can use `/start` to begin the "
+            f"draft, or `/leave` if you want to leave."
+        )
 
     @bot.tree.command(name="leave", description="Leave your current queue")
     async def leave(interaction: discord.Interaction):
@@ -252,6 +258,12 @@ def setup(bot):
         current_mode = next((m for m, q in queues.items() if user in q), None)
 
         if current_mode is None:
+            if _find_player_lobby(user) is not None:
+                await interaction.response.send_message(
+                    "❌ The match has already started — you can't leave now.",
+                    ephemeral=True,
+                )
+                return
             await interaction.response.send_message(
                 "You're not in a queue.",
                 ephemeral=True,
@@ -260,9 +272,58 @@ def setup(bot):
 
         queue = queues[current_mode]
         queue.remove(user)
+        if not queue:
+            queue_last_activity.pop(current_mode, None)
         await interaction.response.send_message(
             f"❌ Left **{current_mode}** ({len(queue)}/{GAME_MODES[current_mode]})"
         )
+
+    @bot.tree.command(name="start", description="Start the match once your queue is full")
+    async def start(interaction: discord.Interaction):
+        if not await ensure_queue_channel(interaction):
+            return
+
+        user = interaction.user
+        current_mode = next(
+            (m for m, q in queues.items() if any(u.id == user.id for u in q)),
+            None,
+        )
+
+        if current_mode is None:
+            await interaction.response.send_message(
+                "❌ You're not in a queue.",
+                ephemeral=True,
+            )
+            return
+
+        queue = queues[current_mode]
+        size = GAME_MODES[current_mode]
+
+        if len(queue) < size:
+            await interaction.response.send_message(
+                f"❌ The **{current_mode}** queue isn't full yet ({len(queue)}/{size}).",
+                ephemeral=True,
+            )
+            return
+
+        if current_mode in lobbies:
+            await interaction.response.send_message(
+                "❌ This match has already started.",
+                ephemeral=True,
+            )
+            return
+
+        # Lock the queue into a lobby and begin captain selection. No more leaving.
+        lobbies[current_mode] = {
+            "mode": current_mode,
+            "players": queue.copy(),
+            "captains": [],
+            "map": None,
+            "locked": False,
+        }
+        queue.clear()
+        queue_last_activity.pop(current_mode, None)
+        await interaction.response.send_message(embed=_lobby_full_embed(current_mode))
 
     @bot.tree.command(name="captain", description="Claim a captain slot after your queue fills")
     async def captain(interaction: discord.Interaction):
@@ -397,5 +458,75 @@ def setup(bot):
         for q in queues.values():
             q.clear()
         lobbies.clear()
+        queue_last_activity.clear()
 
         await interaction.response.send_message("🗑️ All queues cleared.")
+
+    @bot.tree.command(name="remove", description="(Admin) Remove a player from their queue")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def remove(interaction: discord.Interaction, player: discord.Member):
+        if not await ensure_queue_channel(interaction):
+            return
+
+        # Find the open (not-yet-full) queue the player is waiting in.
+        current_mode = next(
+            (m for m, q in queues.items() if any(u.id == player.id for u in q)),
+            None,
+        )
+
+        if current_mode is None:
+            # If they're in a forming lobby, the queue is already full — not allowed.
+            in_lobby = any(
+                any(u.id == player.id for u in lob["players"])
+                for lob in lobbies.values()
+            )
+            if in_lobby:
+                text = "❌ That player's queue is already full and forming a match — can't remove now."
+            else:
+                text = "❌ That player isn't in any open queue."
+            await interaction.response.send_message(text, ephemeral=True)
+            return
+
+        queue = queues[current_mode]
+        target = next(u for u in queue if u.id == player.id)
+        queue.remove(target)
+        if not queue:
+            queue_last_activity.pop(current_mode, None)
+
+        await interaction.response.send_message(
+            f"🚫 {get_player_name(target)} was removed from the **{current_mode}** queue "
+            f"by an admin ({len(queue)}/{GAME_MODES[current_mode]})."
+        )
+
+
+def start_background_tasks(bot):
+    """Start the loop that auto-closes queues with no join activity."""
+
+    @tasks.loop(seconds=60)
+    async def close_idle_queues():
+        now = time.monotonic()
+        channel = bot.get_channel(QUEUE_CHANNEL_ID)
+        for mode, queue in queues.items():
+            if not queue or mode in lobbies:
+                continue
+            last = queue_last_activity.get(mode)
+            if last is None:
+                # Non-empty queue with no recorded activity — start the clock now.
+                queue_last_activity[mode] = now
+                continue
+            if now - last >= QUEUE_INACTIVITY_SECONDS:
+                names = ", ".join(get_player_name(p) for p in queue)
+                queue.clear()
+                queue_last_activity.pop(mode, None)
+                if channel is not None:
+                    minutes = QUEUE_INACTIVITY_SECONDS // 60
+                    await channel.send(
+                        f"⏳ The **{mode}** queue was closed after {minutes} min of "
+                        f"inactivity.\nRemoved: {names}. Use `/join` to queue again."
+                    )
+
+    @close_idle_queues.before_loop
+    async def _before():
+        await bot.wait_until_ready()
+
+    close_idle_queues.start()

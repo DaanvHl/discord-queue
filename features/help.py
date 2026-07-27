@@ -27,9 +27,12 @@ TOPICS = {
         [
             ("/join `<mode>`", "Join a queue (2v2 … 10v10). Nothing happens until it fills."),
             ("/leave", "Leave your current queue — no mode needed, it finds you automatically."),
+            ("/start", "Once the queue is full, any player in it starts the match (captains → map ban → teams → draft). After `/start`, no one can leave."),
             ("/queues", "Show every queue, who's in it, and any match forming."),
             ("/clear", "**(Admin)** Empty every queue."),
-            ("When it fills", "The bot asks two players to become captains — see `/help captains`."),
+            ("/remove `<player>`", "**(Admin)** Remove a specific player from their queue (before it's full)."),
+            ("When it fills", "It announces the full roster and waits — you can still `/leave` until any player runs `/start`."),
+            ("Auto-close", "If nobody joins a queue for **15 minutes**, it closes and everyone in it is removed. Just `/join` again."),
         ],
     ),
     "captains": (

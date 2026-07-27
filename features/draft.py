@@ -257,5 +257,7 @@ def setup(bot):
             )
         map_line = f"\n🗺️ Map: **{game_map}**" if game_map else ""
         await interaction.response.send_message(
-            f"{pick_msg}\n\n🏆 Teams are complete!{map_line}\n\n{get_draft_list(draft)}"
+            f"{pick_msg}\n\n🏆 **Teams are complete!**{map_line}\n\n{get_draft_list(draft)}\n\n"
+            f"🎮 **Everything is set — good luck and have fun!**\n"
+            f"When the game is over, a captain reports the result with `/result <winning team>`."
         )
