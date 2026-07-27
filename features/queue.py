@@ -274,8 +274,18 @@ def setup(bot):
         queue.remove(user)
         if not queue:
             queue_last_activity.pop(current_mode, None)
+
+        size = GAME_MODES[current_mode]
+        if queue:
+            player_list = "\n".join(
+                f"{i}. {get_player_name(p)}" for i, p in enumerate(queue, 1)
+            )
+            body = f"\n\n**Players in queue:**\n{player_list}"
+        else:
+            body = "\n\n*Queue is now empty.*"
+
         await interaction.response.send_message(
-            f"❌ Left **{current_mode}** ({len(queue)}/{GAME_MODES[current_mode]})"
+            f"❌ Left **{current_mode}** ({len(queue)}/{size}){body}"
         )
 
     @bot.tree.command(name="start", description="Start the match once your queue is full")
