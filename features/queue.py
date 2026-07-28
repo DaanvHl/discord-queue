@@ -44,14 +44,12 @@ def _queue_text(mode):
     text = f"🎮 **{mode} queue — {len(queue)}/{size}**\n{roster}"
     if len(queue) >= size:
         text += (
-            "\n\n🎉 **Full!** Use `/start` to begin the draft, "
-            "or `/expand` to open the next format (+2 players)."
+            "\n\n🎉 **Full!**"
+            "\n`/start` to begin the draft"
+            "\n`/expand` to open the next format (+2 players)"
         )
     else:
-        text += (
-            "\n\nClick **✅ Join** / **🚪 Leave** · "
-            "`/close` to start now with the current (even) players."
-        )
+        text += "\n\n`/close` to start now with your current (even) player count"
     return text
 
 

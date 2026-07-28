@@ -76,7 +76,7 @@ def _most_active(limit=10):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.username, COALESCE(SUM(f.games), 0) AS total
+            SELECT p.username, COALESCE(SUM(f.wins + f.losses), 0) AS total
             FROM players p
             LEFT JOIN format_stats f ON f.discord_id = p.discord_id
             GROUP BY p.discord_id
