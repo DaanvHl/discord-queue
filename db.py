@@ -1,4 +1,5 @@
 """Database access: schema/migration, player data, and the points/streak math."""
+import json
 import os
 import sqlite3
 
@@ -53,6 +54,21 @@ def _init_schema():
         losses INTEGER NOT NULL DEFAULT 0,
         streak INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (discord_id, mode)
+    )
+    """)
+
+    # Completed matches, for the web match-log. Rosters are stored as JSON lists of
+    # {name, before, after, delta} so history stays readable even if players rename.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS matches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        mode TEXT NOT NULL,
+        bracket TEXT NOT NULL,
+        game_map TEXT,
+        winner TEXT NOT NULL,
+        team1 TEXT NOT NULL,
+        team2 TEXT NOT NULL
     )
     """)
 
@@ -196,6 +212,20 @@ def record_game(user_id, mode, outcome):
             "UPDATE format_stats SET games=games+1 WHERE discord_id=? AND mode=?",
             (user_id, mode),
         )
+
+
+def record_match(mode, bracket, game_map, winner, team1, team2):
+    """Persist a completed match for the web match-log.
+
+    team1/team2 are lists of {name, before, after, delta} dicts (team1 = red,
+    team2 = blue). Commit is left to the caller.
+    """
+    cursor.execute(
+        "INSERT INTO matches (mode, bracket, game_map, winner, team1, team2) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (mode, bracket, game_map, winner, json.dumps(team1), json.dumps(team2)),
+    )
+    return cursor.lastrowid
 
 
 def get_streak(user_id, mode) -> int:

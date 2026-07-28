@@ -81,6 +81,7 @@ async def start_map_ban(channel, mode, first_banner, second_banner, on_complete)
                     f"🚫 **{get_player_name(interaction.user)} banned {selected_map}**\n\n"
                     f"⚔️ **{get_player_name(second_banner)}** bans next."
                 )
+                await channel.send(f"🗺️ <@{second_banner.id}>, your turn to ban!")
             else:
                 winner = self.maps[0]
 
@@ -157,7 +158,11 @@ async def start_map_ban(channel, mode, first_banner, second_banner, on_complete)
         inline=False,
     )
 
-    view.message = await channel.send(embed=embed, view=view)
+    view.message = await channel.send(
+        content=f"🗺️ <@{first_banner.id}>, you ban first!",
+        embed=embed,
+        view=view,
+    )
 
 
 def setup(bot):
@@ -231,7 +236,7 @@ def setup(bot):
             await interaction.response.send_message(
                 f"✅ {get_player_name(player)} was picked!\n\n"
                 f"{get_draft_list(draft)}\n\n"
-                f"🎯 {get_player_name(next_captain)}'s turn\n"
+                f"🎯 <@{next_captain.id}>, your turn to pick!\n"
                 f"Use `/pick PlayerName`"
             )
             return

@@ -24,10 +24,14 @@ DB_PATH = os.getenv("DB_PATH", "players.db")
 # A non-full queue is auto-closed if nobody joins it for this long (seconds).
 QUEUE_INACTIVITY_SECONDS = 15 * 60
 
+# Optional: channel where confirmed match results are logged. Unset = no logging.
+_results_channel = os.getenv("RESULTS_CHANNEL_ID")
+RESULTS_CHANNEL_ID = int(_results_channel) if _results_channel else None
+
 # --- Points / rating configuration ---
 STARTING_POINTS = 1000
 K_FACTOR = 50        # Points a winner gains in a perfectly even match.
-LOSS_RATIO = 0.9     # Losers drop a bit less than winners gain -> points inflate over time.
+LOSS_RATIO = 0.6     # Losers drop less than winners gain (even match: +50 / -30) -> points inflate over time.
 MIN_GAIN = 10        # A win always pays out at least this much.
 MIN_LOSS = 5         # A loss always costs at least this much.
 

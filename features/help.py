@@ -28,6 +28,8 @@ TOPICS = {
             ("/join `<mode>`", "Join a queue (2v2 … 10v10). Nothing happens until it fills."),
             ("/leave", "Leave your current queue — no mode needed, it finds you automatically."),
             ("/start", "Once the queue is full, any player in it starts the match (captains → map ban → teams → draft). After `/start`, no one can leave."),
+            ("/close", "Queue won't fill? Close it into the format matching your current **even** player count (e.g. 8 players → 4v4) and start."),
+            ("/expand", "Queue full? Expand to the next format up (+2 players) — e.g. 6v6 → 7v7 opens 2 slots."),
             ("/queues", "Show every queue, who's in it, and any match forming."),
             ("/clear", "**(Admin)** Empty every queue."),
             ("/remove `<player>`", "**(Admin)** Remove a specific player from their queue (before it's full)."),
@@ -37,16 +39,14 @@ TOPICS = {
     ),
     "captains": (
         "👑 Captains",
-        "When a queue fills, two players lead the teams.",
+        "After the queue is full and someone runs `/start`, a captain panel with buttons appears.",
         [
-            ("/captain", "Claim a captain slot. Only works right after your queue fills, "
-                         "and only for players in that match. Max 2."),
-            ("/uncaptain", "Give up your slot (before the map ban starts)."),
-            ("1. Map ban", "As soon as both captains lock in, they ban maps first (`/help maps`)."),
-            ("2. Team pick", "The **first** captain picks a side (🔴 Red / 🔵 Blue); the other "
-                             "side goes to the second captain."),
-            ("3. First pick", "As compensation, the **second** captain gets **first pick** in "
-                              "the player draft."),
+            ("🙋 Claim Captain", "Volunteer yourself (max 2). Only players in the match can."),
+            ("🚪 Step Down", "Withdraw as captain."),
+            ("🎲 Roll Captains", "Pick two random captains from the queue — rerollable."),
+            ("🔒 Lock In", "Once two captains are set, lock them in to start the map ban."),
+            ("Then", "Map ban → the **first** captain picks a side (🔴/🔵) → the **second** "
+                     "captain gets first pick in the draft."),
         ],
     ),
     "draft": (

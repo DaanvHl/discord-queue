@@ -3,6 +3,7 @@
 Runs inside the bot process (same asyncio loop) and reads the same SQLite
 database in READ-ONLY mode, so it can never modify bot data.
 """
+import json
 import os
 import sqlite3
 
@@ -90,6 +91,47 @@ def _most_active(limit=10):
         conn.close()
 
 
+def _matches(limit=50):
+    """Recent matches, newest first, with parsed rosters and team averages."""
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, created_at, mode, bracket, game_map, winner, team1, team2
+            FROM matches
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        out = []
+        for mid, created, mode, bracket, game_map, winner, t1, t2 in cur.fetchall():
+            team1 = json.loads(t1)
+            team2 = json.loads(t2)
+
+            def avg(team, key):
+                return round(sum(p[key] for p in team) / len(team)) if team else 0
+
+            out.append({
+                "id": mid,
+                "created_at": created,
+                "mode": mode,
+                "bracket": bracket,
+                "map": game_map,
+                "winner": winner,
+                "team1": team1,
+                "team2": team2,
+                "team1_avg_before": avg(team1, "before"),
+                "team1_avg_after": avg(team1, "after"),
+                "team2_avg_before": avg(team2, "before"),
+                "team2_avg_after": avg(team2, "after"),
+            })
+        return out
+    finally:
+        conn.close()
+
+
 async def _handle_index(request):
     return web.FileResponse(os.path.join(WEB_DIR, "index.html"))
 
@@ -105,11 +147,16 @@ async def _handle_active(request):
     return web.json_response(_most_active())
 
 
+async def _handle_matches(request):
+    return web.json_response(_matches())
+
+
 def build_app():
     app = web.Application()
     app.router.add_get("/", _handle_index)
     app.router.add_get("/api/leaderboard", _handle_leaderboard)
     app.router.add_get("/api/active", _handle_active)
+    app.router.add_get("/api/matches", _handle_matches)
     return app
 
 

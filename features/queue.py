@@ -25,15 +25,119 @@ MODE_CHOICES = [
 ]
 
 
-def _lobby_full_embed(mode):
-    """Announcement shown when a queue fills and captains are needed."""
-    lobby = lobbies[mode]
+def _format_for_count(n):
+    """Return the mode whose team size fits n players (even, in range), else None."""
+    if n < 4 or n % 2 != 0:
+        return None
+    mode = f"{n // 2}v{n // 2}"
+    return mode if mode in GAME_MODES else None
+
+
+def _queue_text(mode):
+    """Roster panel text for a queue."""
+    queue = queues[mode]
+    size = GAME_MODES[mode]
+    roster = "\n".join(
+        f"{i}. {get_player_name(p)}" for i, p in enumerate(queue, 1)
+    ) if queue else "*Empty*"
+
+    text = f"🎮 **{mode} queue — {len(queue)}/{size}**\n{roster}"
+    if len(queue) >= size:
+        text += (
+            "\n\n🎉 **Full!** Use `/start` to begin the draft, "
+            "or `/expand` to open the next format (+2 players)."
+        )
+    else:
+        text += (
+            "\n\nClick **✅ Join** / **🚪 Leave** · "
+            "`/close` to start now with the current (even) players."
+        )
+    return text
+
+
+def _join_result(user, mode):
+    """Try to add a user to a queue. Returns (ok: bool, error_message | None)."""
+    if not is_registered(user.id):
+        return False, "❌ You must register first using `/register`."
+    if mode in lobbies:
+        return False, f"❌ A **{mode}** match is already forming. Wait for it to start."
+    for other_mode, other_queue in queues.items():
+        if any(u.id == user.id for u in other_queue):
+            if other_mode == mode:
+                return False, f"You're already in the **{mode}** queue."
+            return False, (
+                f"❌ You're already in the **{other_mode}** queue. "
+                f"Leave it before joining another."
+            )
+    for other_mode, lobby in lobbies.items():
+        if any(u.id == user.id for u in lobby["players"]):
+            return False, f"❌ You're in a **{other_mode}** match being formed. Finish it first."
+    queue = queues[mode]
+    if len(queue) >= GAME_MODES[mode]:
+        return False, f"❌ The **{mode}** queue is already full!"
+
+    queue.append(user)
+    queue_last_activity[mode] = time.monotonic()
+    return True, None
+
+
+def _leave_result(user, mode):
+    """Try to remove a user from a queue. Returns (ok: bool, error_message | None)."""
+    queue = queues[mode]
+    target = next((u for u in queue if u.id == user.id), None)
+    if target is None:
+        return False, "❌ You're not in this queue."
+    queue.remove(target)
+    if not queue:
+        queue_last_activity.pop(mode, None)
+    return True, None
+
+
+class _QueueView(discord.ui.View):
+    """Join / Leave buttons attached to a queue roster panel."""
+
+    def __init__(self, mode):
+        super().__init__(timeout=None)
+        self.mode = mode
+
+    @discord.ui.button(label="Join", emoji="✅", style=discord.ButtonStyle.success)
+    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, error = _join_result(interaction.user, self.mode)
+        if not ok:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        await interaction.response.edit_message(content=_queue_text(self.mode), view=self)
+
+    @discord.ui.button(label="Leave", emoji="🚪", style=discord.ButtonStyle.secondary)
+    async def leave_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, error = _leave_result(interaction.user, self.mode)
+        if not ok:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        await interaction.response.edit_message(content=_queue_text(self.mode), view=self)
+
+
+def _captain_embed(lobby, locked=False):
+    """Captain-selection panel: players, current captains, and instructions."""
+    caps = lobby["captains"]
+    if caps:
+        cap_text = "\n".join(
+            f"{'🔴' if i == 0 else '🔵'} {get_player_name(c)}" for i, c in enumerate(caps)
+        )
+    else:
+        cap_text = "*None yet — roll or claim below.*"
+
+    if locked:
+        instr = "🔒 Captains locked in!"
+    else:
+        instr = (
+            "🙋 **Claim Captain** to volunteer, or 🎲 **Roll Captains** for random ones.\n"
+            "🚪 **Step Down** to withdraw · 🔒 **Lock In** once two are set."
+        )
+
     embed = discord.Embed(
-        title=f"🏆 {mode} Queue Full!",
-        description=(
-            "Two players must claim captain to start the draft.\n"
-            "Use `/captain` — first two to claim lead the teams."
-        ),
+        title=f"🏆 {lobby['mode']} Queue Full!",
+        description=instr,
         color=discord.Color.gold(),
     )
     embed.add_field(
@@ -41,6 +145,7 @@ def _lobby_full_embed(mode):
         value="\n".join(get_player_name(p) for p in lobby["players"]),
         inline=False,
     )
+    embed.add_field(name=f"👑 Captains ({len(caps)}/2)", value=cap_text, inline=False)
     return embed
 
 
@@ -130,12 +235,13 @@ class _TeamSelectView(discord.ui.View):
         )
         draft_embed = _begin_draft(self.mode, red_captain, blue_captain, first_picker=self.other)
 
+        pick_ping = f"🎯 <@{self.other.id}>, you have first pick! Use `/pick PlayerName`."
         if interaction is not None:
             await interaction.response.edit_message(content=note, embed=None, view=self)
-            await interaction.channel.send(embed=draft_embed)
+            await interaction.channel.send(content=pick_ping, embed=draft_embed)
         elif self.message is not None:
             await self.message.edit(content=note, embed=None, view=self)
-            await self.message.channel.send(embed=draft_embed)
+            await self.message.channel.send(content=pick_ping, embed=draft_embed)
         self.stop()
 
     @discord.ui.button(label="Red", style=discord.ButtonStyle.danger, emoji="🔴")
@@ -172,6 +278,112 @@ def _find_player_lobby(user):
     return None
 
 
+async def _advance_to_map_ban(mode, channel):
+    """Lock captains in and start map ban -> team pick -> draft."""
+    lobby = lobbies[mode]
+    lobby["locked"] = True
+    cap1, cap2 = lobby["captains"][0], lobby["captains"][1]
+
+    async def after_map_ban(selected_map):
+        lobby["map"] = selected_map
+        picker, other = lobby["captains"][0], lobby["captains"][1]
+        view = _TeamSelectView(mode, picker, other)
+        embed = discord.Embed(
+            title="🎽 Pick a Team",
+            description=(
+                f"👑 **{get_player_name(picker)}**, choose your side.\n"
+                f"🎯 **{get_player_name(other)}** will get first pick in the draft."
+            ),
+            color=discord.Color.gold(),
+        )
+        view.message = await channel.send(
+            content=f"🎽 <@{picker.id}>, choose your team's side!",
+            embed=embed,
+            view=view,
+        )
+
+    await channel.send(
+        f"🔒 Captains locked in: **{get_player_name(cap1)}** & **{get_player_name(cap2)}**.\n"
+        f"🗺️ Map ban starting — **{get_player_name(cap1)}** bans first."
+    )
+    await start_map_ban(channel, mode, cap1, cap2, after_map_ban)
+
+
+class _CaptainSelectView(discord.ui.View):
+    """Roll random captains (rerollable) or lock the current two in."""
+
+    def __init__(self, mode):
+        super().__init__(timeout=None)
+        self.mode = mode
+
+    async def _lobby_for(self, interaction):
+        lobby = lobbies.get(self.mode)
+        if lobby is None or lobby.get("locked"):
+            await interaction.response.send_message(
+                "❌ Captain selection is no longer open.", ephemeral=True
+            )
+            return None
+        if not any(u.id == interaction.user.id for u in lobby["players"]):
+            await interaction.response.send_message(
+                "❌ You are not part of this match.", ephemeral=True
+            )
+            return None
+        return lobby
+
+    @discord.ui.button(label="Claim Captain", emoji="🙋", style=discord.ButtonStyle.secondary)
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        lobby = await self._lobby_for(interaction)
+        if lobby is None:
+            return
+        if any(c.id == interaction.user.id for c in lobby["captains"]):
+            await interaction.response.send_message("❌ You are already a captain.", ephemeral=True)
+            return
+        if len(lobby["captains"]) >= 2:
+            await interaction.response.send_message(
+                "❌ Both captain slots are taken — step down or roll to change.", ephemeral=True
+            )
+            return
+        player = next(u for u in lobby["players"] if u.id == interaction.user.id)
+        lobby["captains"].append(player)
+        await interaction.response.edit_message(embed=_captain_embed(lobby), view=self)
+
+    @discord.ui.button(label="Step Down", emoji="🚪", style=discord.ButtonStyle.secondary)
+    async def stepdown(self, interaction: discord.Interaction, button: discord.ui.Button):
+        lobby = await self._lobby_for(interaction)
+        if lobby is None:
+            return
+        cap = next((c for c in lobby["captains"] if c.id == interaction.user.id), None)
+        if cap is None:
+            await interaction.response.send_message("❌ You are not a captain.", ephemeral=True)
+            return
+        lobby["captains"].remove(cap)
+        await interaction.response.edit_message(embed=_captain_embed(lobby), view=self)
+
+    @discord.ui.button(label="Roll Captains", emoji="🎲", style=discord.ButtonStyle.primary)
+    async def roll(self, interaction: discord.Interaction, button: discord.ui.Button):
+        lobby = await self._lobby_for(interaction)
+        if lobby is None:
+            return
+        lobby["captains"] = random.sample(lobby["players"], 2)
+        await interaction.response.edit_message(embed=_captain_embed(lobby), view=self)
+
+    @discord.ui.button(label="Lock In", emoji="🔒", style=discord.ButtonStyle.success)
+    async def lock(self, interaction: discord.Interaction, button: discord.ui.Button):
+        lobby = await self._lobby_for(interaction)
+        if lobby is None:
+            return
+        if len(lobby["captains"]) != 2:
+            await interaction.response.send_message(
+                "❌ Two captains must be set first — claim or roll.", ephemeral=True
+            )
+            return
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(embed=_captain_embed(lobby, locked=True), view=self)
+        self.stop()
+        await _advance_to_map_ban(self.mode, interaction.channel)
+
+
 def setup(bot):
     @bot.tree.command(name="join", description="Join a queue")
     @app_commands.choices(mode=MODE_CHOICES)
@@ -179,74 +391,14 @@ def setup(bot):
         if not await ensure_queue_channel(interaction):
             return
 
-        if not is_registered(interaction.user.id):
-            await interaction.response.send_message(
-                "❌ You must register first using `/register`.",
-                ephemeral=True,
-            )
+        ok, error = _join_result(interaction.user, mode.value)
+        if not ok:
+            await interaction.response.send_message(error, ephemeral=True)
             return
 
-        queue = queues[mode.value]
-        size = GAME_MODES[mode.value]
-        user = interaction.user
-
-        if mode.value in lobbies:
-            await interaction.response.send_message(
-                f"❌ A **{mode.value}** match is already forming. Wait for it to start.",
-                ephemeral=True,
-            )
-            return
-
-        # A player may only be in one queue at a time.
-        for other_mode, other_queue in queues.items():
-            if user in other_queue:
-                if other_mode == mode.value:
-                    text = f"You're already in the **{mode.value}** queue."
-                else:
-                    text = (
-                        f"❌ You're already in the **{other_mode}** queue. "
-                        f"Use `/leave {other_mode}` before joining another."
-                    )
-                await interaction.response.send_message(text, ephemeral=True)
-                return
-
-        # ...nor in a match that is currently being formed.
-        for other_mode, lobby in lobbies.items():
-            if user in lobby["players"]:
-                await interaction.response.send_message(
-                    f"❌ You're in a **{other_mode}** match being formed. Finish it first.",
-                    ephemeral=True,
-                )
-                return
-
-        if len(queue) >= size:
-            await interaction.response.send_message(
-                f"❌ The **{mode.value}** queue is already full!",
-                ephemeral=True,
-            )
-            return
-
-        queue.append(user)
-        queue_last_activity[mode.value] = time.monotonic()
-
-        player_list = "\n".join(
-            f"{i}. {get_player_name(p)}" for i, p in enumerate(queue, 1)
-        )
-
-        if len(queue) < size:
-            await interaction.response.send_message(
-                f"✅ Joined **{mode.value}** queue ({len(queue)}/{size})\n\n"
-                f"**Players in queue:**\n{player_list}"
-            )
-            return
-
-        # Queue is full — but don't start yet. Players can still /leave; any player
-        # in the queue runs /start to lock it and begin the match.
+        # Post the queue roster panel with Join / Leave buttons.
         await interaction.response.send_message(
-            f"✅ Joined **{mode.value}** queue ({size}/{size})\n\n"
-            f"**Players in queue:**\n{player_list}\n\n"
-            f"🎉 **The {mode.value} queue is full!** Any player can use `/start` to begin the "
-            f"draft, or `/leave` if you want to leave."
+            _queue_text(mode.value), view=_QueueView(mode.value)
         )
 
     @bot.tree.command(name="leave", description="Leave your current queue")
@@ -255,7 +407,9 @@ def setup(bot):
             return
 
         user = interaction.user
-        current_mode = next((m for m, q in queues.items() if user in q), None)
+        current_mode = next(
+            (m for m, q in queues.items() if any(u.id == user.id for u in q)), None
+        )
 
         if current_mode is None:
             if _find_player_lobby(user) is not None:
@@ -270,22 +424,9 @@ def setup(bot):
             )
             return
 
-        queue = queues[current_mode]
-        queue.remove(user)
-        if not queue:
-            queue_last_activity.pop(current_mode, None)
-
-        size = GAME_MODES[current_mode]
-        if queue:
-            player_list = "\n".join(
-                f"{i}. {get_player_name(p)}" for i, p in enumerate(queue, 1)
-            )
-            body = f"\n\n**Players in queue:**\n{player_list}"
-        else:
-            body = "\n\n*Queue is now empty.*"
-
+        _leave_result(user, current_mode)
         await interaction.response.send_message(
-            f"❌ Left **{current_mode}** ({len(queue)}/{size}){body}"
+            _queue_text(current_mode), view=_QueueView(current_mode)
         )
 
     @bot.tree.command(name="start", description="Start the match once your queue is full")
@@ -333,99 +474,116 @@ def setup(bot):
         }
         queue.clear()
         queue_last_activity.pop(current_mode, None)
-        await interaction.response.send_message(embed=_lobby_full_embed(current_mode))
 
-    @bot.tree.command(name="captain", description="Claim a captain slot after your queue fills")
-    async def captain(interaction: discord.Interaction):
-        if not await ensure_queue_channel(interaction):
-            return
-
-        user = interaction.user
-        lobby = _find_player_lobby(user)
-
-        if lobby is None:
-            await interaction.response.send_message(
-                "❌ Captains can only be chosen right after your queue fills.",
-                ephemeral=True,
-            )
-            return
-
-        if user in lobby["captains"]:
-            await interaction.response.send_message(
-                "❌ You are already a captain.",
-                ephemeral=True,
-            )
-            return
-
-        if len(lobby["captains"]) >= 2:
-            await interaction.response.send_message(
-                "❌ Both captain slots are already taken.",
-                ephemeral=True,
-            )
-            return
-
-        lobby["captains"].append(user)
-
-        if len(lobby["captains"]) < 2:
-            await interaction.response.send_message(
-                f"👑 {get_player_name(user)} is captain (1/2).\n"
-                f"One more player must use `/captain`."
-            )
-            return
-
-        # Both captains set. Lock the lobby and run the map ban first; the team pick
-        # and player draft follow once the map is decided.
-        lobby["locked"] = True
-        cap1, cap2 = lobby["captains"][0], lobby["captains"][1]
-        mode = lobby["mode"]
-        channel = interaction.channel
-
-        async def after_map_ban(selected_map):
-            lobby["map"] = selected_map
-            picker, other = lobby["captains"][0], lobby["captains"][1]
-            view = _TeamSelectView(mode, picker, other)
-            embed = discord.Embed(
-                title="🎽 Pick a Team",
-                description=(
-                    f"👑 **{get_player_name(picker)}**, choose your side.\n"
-                    f"🎯 **{get_player_name(other)}** will get first pick in the draft."
-                ),
-                color=discord.Color.gold(),
-            )
-            view.message = await channel.send(embed=embed, view=view)
-
+        # Post the captain-selection panel (claim / step down / roll / lock in).
+        view = _CaptainSelectView(current_mode)
         await interaction.response.send_message(
-            f"👑 Captains locked in: **{get_player_name(cap1)}** & **{get_player_name(cap2)}**.\n"
-            f"🗺️ Map ban starting — **{get_player_name(cap1)}** bans first."
+            embed=_captain_embed(lobbies[current_mode]), view=view
         )
-        await start_map_ban(channel, mode, cap1, cap2, after_map_ban)
 
-    @bot.tree.command(name="uncaptain", description="Give up your captain slot before the draft starts")
-    async def uncaptain(interaction: discord.Interaction):
+    @bot.tree.command(
+        name="close",
+        description="Close an under-full queue into the format matching your player count",
+    )
+    async def close(interaction: discord.Interaction):
         if not await ensure_queue_channel(interaction):
             return
 
         user = interaction.user
-        lobby = _find_player_lobby(user)
+        mode = next(
+            (m for m, q in queues.items() if any(u.id == user.id for u in q)), None
+        )
+        if mode is None:
+            await interaction.response.send_message("❌ You're not in a queue.", ephemeral=True)
+            return
 
-        if lobby is None or user not in lobby["captains"]:
+        queue = queues[mode]
+        n = len(queue)
+        target = _format_for_count(n)
+        if target is None:
             await interaction.response.send_message(
-                "❌ You are not a captain in an active selection.",
+                f"❌ Closing needs an even number of players (4–20) — you have {n}.",
+                ephemeral=True,
+            )
+            return
+        if target in lobbies or (target != mode and queues[target]):
+            await interaction.response.send_message(
+                f"❌ The **{target}** slot is busy right now — try again shortly.",
                 ephemeral=True,
             )
             return
 
-        if lobby.get("locked"):
-            await interaction.response.send_message(
-                "❌ The match has already started — captains can no longer change.",
-                ephemeral=True,
-            )
-            return
+        players = queue.copy()
+        queue.clear()
+        queue_last_activity.pop(mode, None)
+        queues[target].clear()
+        queue_last_activity.pop(target, None)
+        lobbies[target] = {
+            "mode": target,
+            "players": players,
+            "captains": [],
+            "map": None,
+            "locked": False,
+        }
 
-        lobby["captains"].remove(user)
+        view = _CaptainSelectView(target)
         await interaction.response.send_message(
-            f"✅ {get_player_name(user)} stepped down. "
-            f"A player must use `/captain` ({len(lobby['captains'])}/2)."
+            content=f"🔒 **{mode}** closed into **{target}** with {n} players.",
+            embed=_captain_embed(lobbies[target]),
+            view=view,
+        )
+
+    @bot.tree.command(
+        name="expand",
+        description="Expand a full queue to the next format up (+2 players)",
+    )
+    async def expand(interaction: discord.Interaction):
+        if not await ensure_queue_channel(interaction):
+            return
+
+        user = interaction.user
+        mode = next(
+            (m for m, q in queues.items() if any(u.id == user.id for u in q)), None
+        )
+        if mode is None:
+            await interaction.response.send_message("❌ You're not in a queue.", ephemeral=True)
+            return
+
+        queue = queues[mode]
+        size = GAME_MODES[mode]
+        if len(queue) < size:
+            await interaction.response.send_message(
+                f"❌ The **{mode}** queue isn't full yet ({len(queue)}/{size}) — "
+                f"`/expand` only works on a full queue.",
+                ephemeral=True,
+            )
+            return
+
+        target = _format_for_count(size + 2)
+        if target is None:
+            await interaction.response.send_message(
+                f"❌ **{mode}** is already the largest format — can't expand further.",
+                ephemeral=True,
+            )
+            return
+        if target in lobbies or queues[target]:
+            await interaction.response.send_message(
+                f"❌ The **{target}** slot is busy right now — try again shortly.",
+                ephemeral=True,
+            )
+            return
+
+        players = queue.copy()
+        queue.clear()
+        queue_last_activity.pop(mode, None)
+        queues[target].extend(players)
+        queue_last_activity[target] = time.monotonic()
+
+        remaining = GAME_MODES[target] - len(players)
+        await interaction.response.send_message(
+            f"⬆️ **{mode}** expanded to **{target}** — {remaining} more can join!\n\n"
+            + _queue_text(target),
+            view=_QueueView(target),
         )
 
     @bot.tree.command(name="queues", description="View all queues")
