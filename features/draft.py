@@ -198,45 +198,43 @@ def setup(bot):
             )
             return
 
-        if draft["turn"] == 1:
+        # Apply the pick to the current captain's team (turn not flipped yet).
+        current = draft["turn"]
+        if current == 1:
             if interaction.user != draft["captain1"]:
-                await interaction.response.send_message(
-                    "❌ It is not your turn.",
-                    ephemeral=True,
-                )
+                await interaction.response.send_message("❌ It is not your turn.", ephemeral=True)
                 return
             draft["team1"].append(player)
-            draft["turn"] = 2
         else:
             if interaction.user != draft["captain2"]:
-                await interaction.response.send_message(
-                    "❌ It is not your turn.",
-                    ephemeral=True,
-                )
+                await interaction.response.send_message("❌ It is not your turn.", ephemeral=True)
                 return
             draft["team2"].append(player)
-            draft["turn"] = 1
 
         draft["remaining"].remove(player)
 
-        # If only one player would be left, their team is forced — auto-assign them
-        # to whoever's turn it is now, saving a pointless final /pick.
+        # Snake endgame: when 3 remain, the second-pick captain picks 2 in a row and
+        # the first-pick captain is auto-given the last player (compensates first pick).
+        rem = len(draft["remaining"])
+        other = 2 if current == 1 else 1
         auto_assigned = None
-        if len(draft["remaining"]) == 1:
-            auto_assigned = draft["remaining"].pop()
-            if draft["turn"] == 1:
-                draft["team1"].append(auto_assigned)
-            else:
-                draft["team2"].append(auto_assigned)
+        bonus_pick = False
+        if rem == 2:
+            draft["turn"] = current      # same (second-pick) captain picks again
+            bonus_pick = True
+        elif rem == 1:
+            auto_assigned = draft["remaining"].pop()   # last player -> first-pick captain
+            (draft["team1"] if other == 1 else draft["team2"]).append(auto_assigned)
+        elif rem > 2:
+            draft["turn"] = other        # normal alternation
 
         if draft["remaining"]:
-            next_captain = (
-                draft["captain1"] if draft["turn"] == 1 else draft["captain2"]
-            )
+            next_captain = draft["captain1"] if draft["turn"] == 1 else draft["captain2"]
+            bonus = " **(bonus pick — you pick again!)**" if bonus_pick else ""
             await interaction.response.send_message(
                 f"✅ {get_player_name(player)} was picked!\n\n"
                 f"{get_draft_list(draft)}\n\n"
-                f"🎯 <@{next_captain.id}>, your turn to pick!\n"
+                f"🎯 <@{next_captain.id}>, your turn to pick!{bonus}\n"
                 f"Use `/pick PlayerName`"
             )
             return

@@ -55,7 +55,7 @@ TOPICS = {
         [
             ("/pick `<player name>`", "Pick an available player onto your team (use their registered name)."),
             ("Turn order", "The captain with first pick starts (see `/help captains`), then it alternates."),
-            ("Auto-assign", "When only one player is left, they're placed automatically — no final pick needed."),
+            ("Snake endgame", "When 3 players remain, the **second-pick** captain picks 2, and the **first-pick** captain is auto-given the last one — balances the first-pick advantage."),
             ("Next step", "The map was already chosen earlier, so once teams are complete the match is ready to play."),
         ],
     ),
