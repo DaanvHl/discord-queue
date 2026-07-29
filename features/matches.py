@@ -146,6 +146,88 @@ def _match_key_for_captain(user_id):
     return None
 
 
+async def _finalize_result(interaction, key, edit):
+    """Apply a pending result, close the match, log it, and sync ranks."""
+    match = active_matches[key]
+    report = pending_results[key]
+    outcome = report["winner"]
+    summary, log = _apply_result(match, outcome)
+    commit()
+
+    players = match["team1"] + match["team2"]
+    del pending_results[key]
+    del active_matches[key]
+
+    text = f"✅ **{key[1]}** result confirmed. Match closed.\n\n{summary}"
+    if edit:
+        await interaction.response.edit_message(content=text, embed=None, view=None)
+    else:
+        await interaction.response.send_message(text)
+
+    # Log to the results channel, if configured.
+    if RESULTS_CHANNEL_ID:
+        log_channel = interaction.client.get_channel(RESULTS_CHANNEL_ID)
+        if log_channel is not None:
+            try:
+                await log_channel.send(embed=_build_log_embed(log))
+            except discord.HTTPException:
+                pass
+
+    # Sync rank roles after points change (skipped on draws — no points move).
+    if outcome != "draw":
+        for player in players:
+            await update_member_ranks(interaction.guild, player)
+
+
+class _ResultView(discord.ui.View):
+    """Confirm / Cancel buttons on a pending result — only the opposing captain may use them."""
+
+    def __init__(self, key, reporter_id):
+        super().__init__(timeout=None)
+        self.key = key
+        self.reporter_id = reporter_id
+
+    async def _opposing_ok(self, interaction):
+        if self.key not in pending_results or self.key not in active_matches:
+            await interaction.response.send_message(
+                "❌ This result is no longer pending.", ephemeral=True
+            )
+            return False
+        match = active_matches[self.key]
+        uid = interaction.user.id
+        if uid not in (match["captain1"].id, match["captain2"].id):
+            await interaction.response.send_message(
+                "❌ Only the opposing captain can do this.", ephemeral=True
+            )
+            return False
+        if uid == self.reporter_id:
+            await interaction.response.send_message(
+                "❌ The opposing captain must confirm — not the one who reported.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm", emoji="✅", style=discord.ButtonStyle.success)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._opposing_ok(interaction):
+            return
+        self.stop()
+        await _finalize_result(interaction, self.key, edit=True)
+
+    @discord.ui.button(label="Cancel", emoji="✖️", style=discord.ButtonStyle.danger)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._opposing_ok(interaction):
+            return
+        pending_results.pop(self.key, None)
+        self.stop()
+        await interaction.response.edit_message(
+            content="✖️ Result cancelled. A captain can report again with `/result`.",
+            embed=None,
+            view=None,
+        )
+
+
 def setup(bot):
     @bot.tree.command(name="result", description="Report a match result")
     @app_commands.choices(winner=[
@@ -189,7 +271,8 @@ def setup(bot):
         await interaction.response.send_message(
             f"⚠️ **{mode} result pending confirmation**\n\n"
             f"Reported result: **{winner.name}**\n\n"
-            f"<@{opposing.id}>, confirm with `/confirm` if this is correct."
+            f"<@{opposing.id}>, confirm or cancel below.",
+            view=_ResultView(key, interaction.user.id),
         )
 
     @bot.tree.command(name="confirm", description="Confirm match result")
@@ -205,39 +288,11 @@ def setup(bot):
             )
             return
 
-        mode = key[1]
-        match = active_matches[key]
-        report = pending_results[key]
-
-        if interaction.user.id == report["reported_by"]:
+        if interaction.user.id == pending_results[key]["reported_by"]:
             await interaction.response.send_message(
                 "❌ The other captain must confirm.",
                 ephemeral=True,
             )
             return
 
-        outcome = report["winner"]
-        summary, log = _apply_result(match, outcome)
-        commit()
-
-        players = match["team1"] + match["team2"]
-        del pending_results[key]
-        del active_matches[key]
-
-        await interaction.response.send_message(
-            f"✅ **{mode}** result confirmed. Match closed.\n\n{summary}"
-        )
-
-        # Log the result to the dedicated results channel, if one is configured.
-        if RESULTS_CHANNEL_ID:
-            log_channel = interaction.client.get_channel(RESULTS_CHANNEL_ID)
-            if log_channel is not None:
-                try:
-                    await log_channel.send(embed=_build_log_embed(log))
-                except discord.HTTPException:
-                    pass
-
-        # Sync rank roles after points change (skipped on draws — no points move).
-        if outcome != "draw":
-            for player in players:
-                await update_member_ranks(interaction.guild, player)
+        await _finalize_result(interaction, key, edit=False)

@@ -77,8 +77,9 @@ TOPICS = {
         "A result only counts once **both captains agree**.",
         [
             ("/result `<winner>`", "A captain reports the outcome: 🔴 Red, 🔵 Blue, or 🤝 Draw."),
-            ("/confirm", "The **opposing** captain confirms it. Only then are points, records and "
-                        "ranks updated and the match closed."),
+            ("Confirm / Cancel", "The **opposing** captain clicks **✅ Confirm** or **✖️ Cancel** on "
+                                 "the result message (or types `/confirm`). Only on confirm are points, "
+                                 "records and ranks updated. Cancel lets it be re-reported."),
             ("Draws", "A draw counts as a game played but changes no points."),
         ],
     ),
