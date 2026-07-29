@@ -31,7 +31,7 @@ TOPICS = {
             ("/close", "Queue won't fill? Close it into the format matching your current **even** player count (e.g. 8 players → 4v4) and start."),
             ("/expand", "Queue full? Expand to the next format up (+2 players) — e.g. 6v6 → 7v7 opens 2 slots."),
             ("/queues", "Show every queue, who's in it, and any match forming."),
-            ("/clear", "**(Admin/Organizer)** Empty every queue."),
+            ("/clear `[mode]`", "**(Admin/Organizer)** Clear one queue/match in this channel (pick a mode — works at any stage: waiting, captains, draft, or awaiting result), or everything if no mode given."),
             ("/remove `<player>`", "**(Admin/Organizer)** Remove a specific player from their queue (before it's full)."),
             ("When it fills", "It announces the full roster and waits — you can still `/leave` until any player runs `/start`."),
             ("Auto-close", "If nobody joins a queue for **15 minutes**, it closes and everyone in it is removed. Just `/join` again."),

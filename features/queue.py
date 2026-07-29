@@ -20,7 +20,14 @@ from checks import ensure_organizer, ensure_queue_channel
 from config import GAME_MODES, QUEUE_INACTIVITY_SECONDS
 from db import get_player_name, is_registered
 from features.draft import get_draft_list, start_map_ban
-from state import active_matches, drafts, lobbies, queue_last_activity, queues
+from state import (
+    active_matches,
+    drafts,
+    lobbies,
+    pending_results,
+    queue_last_activity,
+    queues,
+)
 
 MODE_CHOICES = [
     app_commands.Choice(name=mode, value=mode) for mode in GAME_MODES
@@ -178,7 +185,9 @@ def _captain_embed(lobby, locked=False):
 def _begin_draft(key, red_captain, blue_captain, first_picker):
     """Turn a lobby into a captain draft with the chosen sides; return the draft embed."""
     cid, mode = key
-    lobby = lobbies.pop(key)
+    lobby = lobbies.pop(key, None)
+    if lobby is None:
+        return None  # match was cleared by an admin mid-selection
     players = lobby["players"]
 
     remaining = [p for p in players if p not in (red_captain, blue_captain)]
@@ -257,6 +266,14 @@ class _TeamSelectView(discord.ui.View):
             f"🎯 **{get_player_name(self.other)}** gets first pick."
         )
         draft_embed = _begin_draft(self.key, red_captain, blue_captain, first_picker=self.other)
+        if draft_embed is None:
+            cancelled = "❌ This match was cleared by an admin."
+            if interaction is not None:
+                await interaction.response.edit_message(content=cancelled, embed=None, view=None)
+            elif self.message is not None:
+                await self.message.edit(content=cancelled, embed=None, view=None)
+            self.stop()
+            return
 
         pick_ping = f"🎯 <@{self.other.id}>, you have first pick! Use `/pick PlayerName`."
         if interaction is not None:
@@ -618,18 +635,41 @@ def setup(bot):
 
         await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="clear", description="(Admin/Organizer) Clear every queue")
-    async def clear(interaction: discord.Interaction):
+    @bot.tree.command(
+        name="clear",
+        description="(Admin/Organizer) Clear one queue/match (pick a mode) or all if none given",
+    )
+    @app_commands.choices(mode=MODE_CHOICES)
+    async def clear(interaction: discord.Interaction, mode: app_commands.Choice[str] = None):
         if not await ensure_queue_channel(interaction):
             return
         if not await ensure_organizer(interaction):
             return
 
-        queues.clear()
-        lobbies.clear()
-        queue_last_activity.clear()
+        all_state = (queues, lobbies, drafts, active_matches, pending_results, queue_last_activity)
 
-        await interaction.response.send_message("🗑️ All queues cleared.")
+        if mode is None:
+            for d in all_state:
+                d.clear()
+            await interaction.response.send_message("🗑️ All queues and matches cleared.")
+            return
+
+        # Clear just this channel's queue/match for the chosen mode — at any stage
+        # (waiting, captain selection, draft, or awaiting result).
+        key = (interaction.channel.id, mode.value)
+        existed = any(key in d for d in (queues, lobbies, drafts, active_matches))
+        for d in all_state:
+            d.pop(key, None)
+
+        if existed:
+            await interaction.response.send_message(
+                f"🗑️ Cleared the **{mode.value}** queue/match in this channel."
+            )
+        else:
+            await interaction.response.send_message(
+                f"ℹ️ There's no active **{mode.value}** queue or match in this channel.",
+                ephemeral=True,
+            )
 
     @bot.tree.command(name="remove", description="(Admin/Organizer) Remove a player from their queue")
     async def remove(interaction: discord.Interaction, player: discord.Member):
