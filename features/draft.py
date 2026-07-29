@@ -242,9 +242,11 @@ def setup(bot):
             return
 
         # Draft finished (the last player may have been auto-assigned above).
-        # The map was already decided before the draft, so carry it into the match.
+        # Keyed by (channel_id, mode) so concurrent matches never collide.
         game_map = draft.get("map")
-        active_matches[interaction.channel.id] = {
+        key = (draft["channel_id"], draft["mode"])
+        active_matches[key] = {
+            "channel_id": draft["channel_id"],
             "mode": draft["mode"],
             "team1": draft["team1"],
             "team2": draft["team2"],
@@ -252,7 +254,7 @@ def setup(bot):
             "captain2": draft["captain2"],
             "map": game_map,
         }
-        drafts.pop(draft["mode"], None)
+        drafts.pop(key, None)
 
         pick_msg = f"✅ {get_player_name(player)} was picked!"
         if auto_assigned is not None:

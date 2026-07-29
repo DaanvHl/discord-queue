@@ -15,7 +15,41 @@ def _require(name):
 # Secrets and Discord IDs — all loaded from .env
 TOKEN = _require("DISCORD_TOKEN")
 GUILD_ID = int(_require("GUILD_ID"))
-QUEUE_CHANNEL_ID = int(_require("QUEUE_CHANNEL_ID"))
+
+
+def _queue_channel_ids():
+    """Channel IDs where queue commands are allowed.
+
+    Accepts QUEUE_CHANNEL_ID (single) and/or QUEUE_CHANNEL_IDS (comma-separated),
+    merged into one de-duplicated list.
+    """
+    raw = []
+    single = os.getenv("QUEUE_CHANNEL_ID")
+    if single:
+        raw.append(single)
+    raw.extend(os.getenv("QUEUE_CHANNEL_IDS", "").split(","))
+
+    ids, seen = [], set()
+    for part in raw:
+        part = part.strip()
+        if part and int(part) not in seen:
+            seen.add(int(part))
+            ids.append(int(part))
+    if not ids:
+        raise RuntimeError(
+            "No queue channels set. Add QUEUE_CHANNEL_ID or QUEUE_CHANNEL_IDS to your .env file."
+        )
+    return ids
+
+
+# Every channel where queue commands may be used; the first is the "primary"
+# channel used for bot-initiated announcements (e.g. inactivity auto-close).
+QUEUE_CHANNEL_IDS = _queue_channel_ids()
+QUEUE_CHANNEL_ID = QUEUE_CHANNEL_IDS[0]
+
+# Optional: a role that may use admin commands (alongside server administrators).
+_organizer = os.getenv("ORGANIZER_ROLE_ID")
+ORGANIZER_ROLE_ID = int(_organizer) if _organizer else None
 
 # Database file location. Defaults to a local file. When hosting, point this at a
 # persistent volume (e.g. DB_PATH=/data/players.db) so data survives redeploys.

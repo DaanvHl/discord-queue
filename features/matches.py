@@ -138,6 +138,14 @@ def _build_log_embed(log):
     return embed
 
 
+def _match_key_for_captain(user_id):
+    """Key (channel_id, mode) of the active match this user is a captain of, or None."""
+    for key, match in active_matches.items():
+        if user_id in (match["captain1"].id, match["captain2"].id):
+            return key
+    return None
+
+
 def setup(bot):
     @bot.tree.command(name="result", description="Report a match result")
     @app_commands.choices(winner=[
@@ -149,33 +157,25 @@ def setup(bot):
         if not await ensure_queue_channel(interaction):
             return
 
-        channel_id = interaction.channel.id
-
-        if channel_id not in active_matches:
+        # Find the match this captain belongs to (a captain is in only one).
+        key = _match_key_for_captain(interaction.user.id)
+        if key is None:
             await interaction.response.send_message(
-                "❌ No active match found in this channel.",
+                "❌ You're not a captain of an active match.",
                 ephemeral=True,
             )
             return
 
-        match = active_matches[channel_id]
-        captains = [match["captain1"].id, match["captain2"].id]
-
-        if interaction.user.id not in captains:
-            await interaction.response.send_message(
-                "❌ Only captains can report results.",
-                ephemeral=True,
-            )
-            return
-
-        if channel_id in pending_results:
+        if key in pending_results:
             await interaction.response.send_message(
                 "❌ This match already has a pending result.",
                 ephemeral=True,
             )
             return
 
-        pending_results[channel_id] = {
+        mode = key[1]
+        match = active_matches[key]
+        pending_results[key] = {
             "winner": winner.value,
             "reported_by": interaction.user.id,
         }
@@ -187,7 +187,7 @@ def setup(bot):
             opposing = match["captain1"]
 
         await interaction.response.send_message(
-            f"⚠️ **Result pending confirmation**\n\n"
+            f"⚠️ **{mode} result pending confirmation**\n\n"
             f"Reported result: **{winner.name}**\n\n"
             f"<@{opposing.id}>, confirm with `/confirm` if this is correct."
         )
@@ -197,36 +197,21 @@ def setup(bot):
         if not await ensure_queue_channel(interaction):
             return
 
-        channel_id = interaction.channel.id
-
-        if channel_id not in pending_results:
+        key = _match_key_for_captain(interaction.user.id)
+        if key is None or key not in pending_results:
             await interaction.response.send_message(
-                "❌ No pending result.",
+                "❌ No pending result for a match you're a captain of.",
                 ephemeral=True,
             )
             return
 
-        if channel_id not in active_matches:
-            await interaction.response.send_message(
-                "❌ No active match.",
-                ephemeral=True,
-            )
-            return
-
-        match = active_matches[channel_id]
-        captains = [match["captain1"].id, match["captain2"].id]
-        report = pending_results[channel_id]
+        mode = key[1]
+        match = active_matches[key]
+        report = pending_results[key]
 
         if interaction.user.id == report["reported_by"]:
             await interaction.response.send_message(
                 "❌ The other captain must confirm.",
-                ephemeral=True,
-            )
-            return
-
-        if interaction.user.id not in captains:
-            await interaction.response.send_message(
-                "❌ Only captains can confirm.",
                 ephemeral=True,
             )
             return
@@ -236,11 +221,11 @@ def setup(bot):
         commit()
 
         players = match["team1"] + match["team2"]
-        del pending_results[channel_id]
-        del active_matches[channel_id]
+        del pending_results[key]
+        del active_matches[key]
 
         await interaction.response.send_message(
-            f"✅ Result confirmed. Match closed.\n\n{summary}"
+            f"✅ **{mode}** result confirmed. Match closed.\n\n{summary}"
         )
 
         # Log the result to the dedicated results channel, if one is configured.
