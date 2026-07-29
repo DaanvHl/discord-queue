@@ -110,6 +110,8 @@ TOPICS = {
             ("/profile", "Show your registered name."),
             ("/stats", "Your points, rank and W/L for each section and format."),
             ("/leaderboard `<section>`", "Top 10 players in a section, with W/L."),
+            ("/punish `<player> <bracket> <amount>`", "**(Admin/Organizer)** Remove points from a player in a bracket (may downgrade their rank)."),
+            ("/give `<player> <bracket> <amount>`", "**(Admin/Organizer)** Give points to a player in a bracket (may upgrade their rank)."),
         ],
     ),
 }

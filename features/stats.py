@@ -2,9 +2,11 @@
 import discord
 from discord import app_commands
 
-from checks import ensure_queue_channel
+from checks import ensure_organizer, ensure_queue_channel
 from config import BRACKET_LABELS, BRACKETS, GAME_MODES, STREAK_THRESHOLD
 from db import (
+    add_points,
+    commit,
     get_bracket_record,
     get_format_stats,
     get_leaderboard,
@@ -13,7 +15,7 @@ from db import (
     is_registered,
     win_rate,
 )
-from ranks import RANK_COLORS, rank_for_points
+from ranks import RANK_COLORS, rank_for_points, update_member_ranks
 
 BRACKET_CHOICES = [
     app_commands.Choice(name=BRACKET_LABELS[b], value=b) for b in BRACKETS
@@ -82,6 +84,39 @@ def build_profile_embed(user):
     return embed
 
 
+async def _apply_point_change(interaction, player, bracket, amount, sign):
+    """Admin adjust: add (sign=+1) or remove (sign=-1) `amount` points in a bracket."""
+    if not await ensure_queue_channel(interaction):
+        return
+    if not await ensure_organizer(interaction):
+        return
+    if amount <= 0:
+        await interaction.response.send_message(
+            "❌ Amount must be a positive number.", ephemeral=True
+        )
+        return
+    if not is_registered(player.id):
+        await interaction.response.send_message(
+            f"❌ {get_player_name(player)} isn't registered.", ephemeral=True
+        )
+        return
+
+    old = get_points(player.id, bracket)
+    new = add_points(player.id, bracket, sign * amount)  # clamped at 0
+    commit()
+    await update_member_ranks(interaction.guild, player)  # re-sync rank roles
+
+    old_rank, new_rank = rank_for_points(old), rank_for_points(new)
+    if sign > 0:
+        head = f"🔺 **{get_player_name(player)}** was given **+{amount}**"
+    else:
+        head = f"🔻 **{get_player_name(player)}** was punished **-{amount}**"
+    msg = f"{head} in **{BRACKET_LABELS[bracket]}**.\n{old} → **{new}** points"
+    if new_rank != old_rank:
+        msg += f"\nRank: **{old_rank} → {new_rank}**"
+    await interaction.response.send_message(msg)
+
+
 def setup(bot):
     @bot.tree.command(name="stats", description="View your profile card")
     async def stats(interaction: discord.Interaction):
@@ -125,3 +160,29 @@ def setup(bot):
             embed.description = "*No ranked players yet.*"
 
         await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(
+        name="punish",
+        description="(Admin/Organizer) Remove points from a player in a bracket",
+    )
+    @app_commands.choices(bracket=BRACKET_CHOICES)
+    async def punish(
+        interaction: discord.Interaction,
+        player: discord.Member,
+        bracket: app_commands.Choice[str],
+        amount: int,
+    ):
+        await _apply_point_change(interaction, player, bracket.value, amount, -1)
+
+    @bot.tree.command(
+        name="give",
+        description="(Admin/Organizer) Give points to a player in a bracket",
+    )
+    @app_commands.choices(bracket=BRACKET_CHOICES)
+    async def give(
+        interaction: discord.Interaction,
+        player: discord.Member,
+        bracket: app_commands.Choice[str],
+        amount: int,
+    ):
+        await _apply_point_change(interaction, player, bracket.value, amount, 1)
