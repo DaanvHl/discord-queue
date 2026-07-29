@@ -112,15 +112,15 @@ MAPS = {
         "Valley", "Short Bridge",
     ],
     "5v5": [
-        "Cross", "Fort Knox", "Garder", "Sandal", "Molotov",
+        "Cross", "Fort Knox", "Garder", "Sandal",
         "Station", "Valley", "Zone", "Pass",
     ],
     "6v6": [
-        "Sandal", "Garder", "Zone", "Fort Knox", "Station", "Cross",
-        "Siege", "Forest", "Red Alert", "Courage",
+        "Sandal", "Garder", "Zone", "Fort Knox", "Iran",
+        "Cross", "Forest", "Red Alert", "Courage",
     ],
     "7v7": [
-        "Station", "Molotov", "Red Alert", "Fort Knox",
+        "Station", "Red Alert", "Fort Knox",
         "Future", "Noise", "Iran", "Siege", "Forest", "Courage",
     ],
     "8v8": [
