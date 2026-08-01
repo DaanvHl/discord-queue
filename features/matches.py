@@ -1,9 +1,9 @@
-"""Match result reporting and confirmation: /result, /confirm."""
+"""Match result reporting and confirmation: /result, /confirm, /force-result."""
 import discord
 from discord import app_commands
 
-from checks import ensure_queue_channel
-from config import BRACKET_LABELS, RESULTS_CHANNEL_ID
+from checks import ensure_organizer, ensure_queue_channel
+from config import BRACKET_LABELS, GAME_MODES, RESULTS_CHANNEL_ID
 from ranks import update_member_ranks
 from db import (
     add_points,
@@ -18,6 +18,13 @@ from db import (
     streak_bonus,
 )
 from state import active_matches, pending_results
+
+MODE_CHOICES = [app_commands.Choice(name=m, value=m) for m in GAME_MODES]
+WINNER_CHOICES = [
+    app_commands.Choice(name="🔴 Red Team", value="team1"),
+    app_commands.Choice(name="🔵 Blue Team", value="team2"),
+    app_commands.Choice(name="🤝 Draw", value="draw"),
+]
 
 
 def _apply_result(match, outcome):
@@ -146,25 +153,19 @@ def _match_key_for_captain(user_id):
     return None
 
 
-async def _finalize_result(interaction, key, edit):
-    """Apply a pending result, close the match, log it, and sync ranks."""
+async def _apply_and_close(key, outcome):
+    """Apply an outcome, close the match, and return (summary, log, players)."""
     match = active_matches[key]
-    report = pending_results[key]
-    outcome = report["winner"]
     summary, log = _apply_result(match, outcome)
     commit()
-
     players = match["team1"] + match["team2"]
-    del pending_results[key]
-    del active_matches[key]
+    pending_results.pop(key, None)
+    active_matches.pop(key, None)
+    return summary, log, players
 
-    text = f"✅ **{key[1]}** result confirmed. Match closed.\n\n{summary}"
-    if edit:
-        await interaction.response.edit_message(content=text, embed=None, view=None)
-    else:
-        await interaction.response.send_message(text)
 
-    # Log to the results channel, if configured.
+async def _post_side_effects(interaction, log, players, outcome):
+    """Log to the results channel and re-sync rank roles after a result."""
     if RESULTS_CHANNEL_ID:
         log_channel = interaction.client.get_channel(RESULTS_CHANNEL_ID)
         if log_channel is not None:
@@ -172,9 +173,7 @@ async def _finalize_result(interaction, key, edit):
                 await log_channel.send(embed=_build_log_embed(log))
             except discord.HTTPException:
                 pass
-
-    # Sync rank roles after points change (skipped on draws — no points move).
-    if outcome != "draw":
+    if outcome != "draw":  # draws move no points
         for player in players:
             await update_member_ranks(interaction.guild, player)
 
@@ -212,8 +211,15 @@ class _ResultView(discord.ui.View):
     async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self._opposing_ok(interaction):
             return
+        outcome = pending_results[self.key]["winner"]
         self.stop()
-        await _finalize_result(interaction, self.key, edit=True)
+        summary, log, players = await _apply_and_close(self.key, outcome)
+        await interaction.response.edit_message(
+            content=f"✅ **{self.key[1]}** result confirmed. Match closed.\n\n{summary}",
+            embed=None,
+            view=None,
+        )
+        await _post_side_effects(interaction, log, players, outcome)
 
     @discord.ui.button(label="Cancel", emoji="✖️", style=discord.ButtonStyle.danger)
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -228,13 +234,48 @@ class _ResultView(discord.ui.View):
         )
 
 
+class _ForceResultView(discord.ui.View):
+    """Ephemeral Confirm / Cancel for an admin forcing a result (only the admin sees it)."""
+
+    def __init__(self, key, outcome):
+        super().__init__(timeout=120)
+        self.key = key
+        self.outcome = outcome
+
+    @discord.ui.button(label="Confirm", emoji="✅", style=discord.ButtonStyle.success)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.key not in active_matches:
+            self.stop()
+            await interaction.response.edit_message(
+                content="❌ That match is no longer active — nothing to force.", view=None
+            )
+            return
+        self.stop()
+        outcome = self.outcome
+        summary, log, players = await _apply_and_close(self.key, outcome)
+        await interaction.response.edit_message(
+            content=f"✅ Forced the **{self.key[1]}** result. Match closed.", view=None
+        )
+        # Announce publicly so the players see the outcome.
+        try:
+            await interaction.channel.send(
+                f"🛠️ **{self.key[1]}** result set by an admin. Match closed.\n\n{summary}"
+            )
+        except discord.HTTPException:
+            pass
+        await _post_side_effects(interaction, log, players, outcome)
+
+    @discord.ui.button(label="Cancel", emoji="✖️", style=discord.ButtonStyle.danger)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="✖️ Cancelled — no result was set.", view=None
+        )
+
+
 def setup(bot):
     @bot.tree.command(name="result", description="Report a match result")
-    @app_commands.choices(winner=[
-        app_commands.Choice(name="🔴 Red Team", value="team1"),
-        app_commands.Choice(name="🔵 Blue Team", value="team2"),
-        app_commands.Choice(name="🤝 Draw", value="draw"),
-    ])
+    @app_commands.choices(winner=WINNER_CHOICES)
     async def result(interaction: discord.Interaction, winner: app_commands.Choice[str]):
         if not await ensure_queue_channel(interaction):
             return
@@ -295,4 +336,44 @@ def setup(bot):
             )
             return
 
-        await _finalize_result(interaction, key, edit=False)
+        outcome = pending_results[key]["winner"]
+        summary, log, players = await _apply_and_close(key, outcome)
+        await interaction.response.send_message(
+            f"✅ **{key[1]}** result confirmed. Match closed.\n\n{summary}"
+        )
+        await _post_side_effects(interaction, log, players, outcome)
+
+    @bot.tree.command(
+        name="force-result",
+        description="(Admin/Organizer) Set a match result without being a captain",
+    )
+    @app_commands.choices(format=MODE_CHOICES, winner=WINNER_CHOICES)
+    async def force_result(
+        interaction: discord.Interaction,
+        format: app_commands.Choice[str],
+        winner: app_commands.Choice[str],
+    ):
+        if not await ensure_queue_channel(interaction):
+            return
+        if not await ensure_organizer(interaction):
+            return
+
+        key = (interaction.channel.id, format.value)
+        if key not in active_matches:
+            await interaction.response.send_message(
+                f"❌ There's no active **{format.value}** match in this channel "
+                f"(a match must be past the draft, awaiting a result).",
+                ephemeral=True,
+            )
+            return
+
+        pending_note = ""
+        if key in pending_results:
+            pending_note = "\n\n⚠️ This overrides the result currently pending confirmation."
+
+        await interaction.response.send_message(
+            f"⚠️ Force the **{format.value}** result to **{winner.name}**?\n"
+            f"This closes the match and updates points, records and ranks.{pending_note}",
+            view=_ForceResultView(key, winner.value),
+            ephemeral=True,
+        )

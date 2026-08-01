@@ -80,6 +80,9 @@ TOPICS = {
             ("Confirm / Cancel", "The **opposing** captain clicks **✅ Confirm** or **✖️ Cancel** on "
                                  "the result message (or types `/confirm`). Only on confirm are points, "
                                  "records and ranks updated. Cancel lets it be re-reported."),
+            ("/force-result `<format> <winner>`", "**(Admin/Organizer)** Set a result for the active match "
+                                                  "of a format in this channel without being a captain. Shows a "
+                                                  "private ✅ Confirm / ✖️ Cancel prompt; overrides any pending result."),
             ("Draws", "A draw counts as a game played but changes no points."),
         ],
     ),
