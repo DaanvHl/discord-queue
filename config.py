@@ -124,7 +124,7 @@ MAPS = {
         "Future", "Noise", "Iran", "Siege", "Forest", "Courage",
     ],
     "8v8": [
-        "Noise", "Station", "Molotov", "Red Alert",
+        "Noise", "Station", "Molotov", "Red Alert", "Forest",
         "Future", "Polygon", "Iran", "Courage",
     ],
     "9v9": [
