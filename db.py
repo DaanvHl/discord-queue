@@ -11,6 +11,7 @@ from config import (
     LOSS_RATIO,
     MIN_GAIN,
     MIN_LOSS,
+    RATING_DIFF_WEIGHT,
     STARTING_POINTS,
     STREAK_BONUS_MAX,
     STREAK_BONUS_PER_WIN,
@@ -272,10 +273,17 @@ def streak_bonus(streak) -> float:
 
 
 def calculate_points_change(winner_avg, loser_avg):
-    """Return (gain, loss) for a match given each team's average rating."""
-    winner_expected = 1 / (1 + 10 ** ((loser_avg - winner_avg) / 400))
-    swing = 2 * K_FACTOR * (1 - winner_expected)
+    """Return (gain, loss) for a match given each team's average rating.
 
-    gain = max(MIN_GAIN, round(swing))
-    loss = max(MIN_LOSS, round(swing * LOSS_RATIO))
+    A win pays a flat base (K_FACTOR); the team-average difference only nudges it
+    by at most RATING_DIFF_WEIGHT points. Beating a stronger team pays a little more,
+    an expected win a little less — so a big rating gap barely changes the reward.
+    """
+    winner_expected = 1 / (1 + 10 ** ((loser_avg - winner_avg) / 400))
+    # (0.5 - expected) * 2 is in [-1, +1]: positive for an upset, negative for an
+    # expected win. Scaled by RATING_DIFF_WEIGHT this is the small adjustment.
+    adjustment = round(RATING_DIFF_WEIGHT * (0.5 - winner_expected) * 2)
+
+    gain = max(MIN_GAIN, K_FACTOR + adjustment)
+    loss = max(MIN_LOSS, round(K_FACTOR * LOSS_RATIO) + adjustment)
     return gain, loss

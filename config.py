@@ -64,8 +64,13 @@ RESULTS_CHANNEL_ID = int(_results_channel) if _results_channel else None
 
 # --- Points / rating configuration ---
 STARTING_POINTS = 1000
-K_FACTOR = 50        # Points a winner gains in a perfectly even match.
+K_FACTOR = 50        # Base points a winner gains (a perfectly even match).
 LOSS_RATIO = 0.6     # Losers drop less than winners gain (even match: +50 / -30) -> points inflate over time.
+# How much the team-average difference nudges the base payout. The gain/loss only
+# moves by at most this many points between an even match and a wildly lopsided one
+# (e.g. beating a much stronger team pays +RATING_DIFF_WEIGHT, an expected win pays
+# -RATING_DIFF_WEIGHT). Small on purpose so mismatches barely change the reward.
+RATING_DIFF_WEIGHT = 5
 MIN_GAIN = 10        # A win always pays out at least this much.
 MIN_LOSS = 5         # A loss always costs at least this much.
 

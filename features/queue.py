@@ -63,6 +63,23 @@ def _find_player_lobby(user):
     return None
 
 
+def _find_player_draft(user):
+    """Return the draft (captain pick phase) the user is part of, or None."""
+    for draft in drafts.values():
+        everyone = draft["team1"] + draft["team2"] + draft["remaining"]
+        if any(u.id == user.id for u in everyone):
+            return draft
+    return None
+
+
+def _find_player_match(user):
+    """Return the active match (started, awaiting a result) the user is in, or None."""
+    for match in active_matches.values():
+        if any(u.id == user.id for u in match["team1"] + match["team2"]):
+            return match
+    return None
+
+
 def _queue_text(key):
     """Roster panel text for a queue key (channel_id, mode)."""
     _cid, mode = key
@@ -103,6 +120,13 @@ def _join_result(user, key):
         )
     if _find_player_lobby(user) is not None:
         return False, "❌ You're in a match being formed. Finish it first."
+    if _find_player_draft(user) is not None:
+        return False, "❌ You're in a captain draft. Finish the match first."
+    if _find_player_match(user) is not None:
+        return False, (
+            "❌ You're in an active match. Finish it and confirm the result "
+            "before joining another queue."
+        )
 
     queue = queues.setdefault(key, [])
     if len(queue) >= GAME_MODES[mode]:
