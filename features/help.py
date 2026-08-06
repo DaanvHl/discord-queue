@@ -28,6 +28,7 @@ TOPICS = {
             ("/join `<mode>`", "Join a queue (2v2 … 10v10). Nothing happens until it fills."),
             ("/leave", "Leave your current queue — no mode needed, it finds you automatically."),
             ("/start", "Once the queue is full, any player in it starts the match (captains → map ban → teams → draft). After `/start`, no one can leave."),
+            ("/open", "Undo `/start` while captains **aren't locked in yet** — reopens the queue so players can `/leave` or `/expand` again. Any player in the match can use it."),
             ("/close", "Queue won't fill? Close it into the format matching your current **even** player count (e.g. 8 players → 4v4) and start."),
             ("/expand", "Queue full? Expand to the next format up (+2 players) — e.g. 6v6 → 7v7 opens 2 slots."),
             ("/queues", "Show every queue, who's in it, and any match forming."),

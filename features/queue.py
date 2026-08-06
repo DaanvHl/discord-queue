@@ -63,6 +63,19 @@ def _find_player_lobby(user):
     return None
 
 
+def _find_player_lobby_key(user, channel_id=None):
+    """The (channel_id, mode) lobby key the user is part of, or None.
+
+    If channel_id is given, only lobbies in that channel are considered.
+    """
+    for key, lobby in lobbies.items():
+        if channel_id is not None and key[0] != channel_id:
+            continue
+        if any(u.id == user.id for u in lobby["players"]):
+            return key
+    return None
+
+
 def _find_player_draft(user):
     """Return the draft (captain pick phase) the user is part of, or None."""
     for draft in drafts.values():
@@ -515,6 +528,43 @@ def setup(bot):
         view = _CaptainSelectView(key)
         await interaction.response.send_message(
             embed=_captain_embed(lobbies[key]), view=view
+        )
+
+    @bot.tree.command(
+        name="open",
+        description="Reopen the queue after /start, before captains lock in",
+    )
+    async def open_queue(interaction: discord.Interaction):
+        if not await ensure_queue_channel(interaction):
+            return
+
+        key = _find_player_lobby_key(interaction.user, interaction.channel.id)
+        if key is None:
+            await interaction.response.send_message(
+                "❌ You're not in a match that's forming in this channel.",
+                ephemeral=True,
+            )
+            return
+
+        lobby = lobbies[key]
+        if lobby.get("locked"):
+            await interaction.response.send_message(
+                "❌ Captains are already locked in — the match is underway.",
+                ephemeral=True,
+            )
+            return
+
+        # Move the lobby back to an open queue so players can leave/expand again.
+        players = lobby["players"]
+        lobbies.pop(key, None)
+        queues[key] = list(players)
+        queue_last_activity[key] = time.monotonic()
+
+        await interaction.response.send_message(
+            "🔓 **Queue reopened** — players can `/leave` again, or `/expand` for "
+            "more slots. Run `/start` when you're ready.\n\n"
+            f"{_queue_text(key)}",
+            view=_QueueView(key),
         )
 
     @bot.tree.command(
