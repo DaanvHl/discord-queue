@@ -6,7 +6,57 @@ import discord
 from checks import ensure_queue_channel
 from config import MAPS
 from db import get_player_name
-from state import active_matches, drafts
+from state import active_matches, drafts, lobbies
+
+
+def _teams_overview(team1, team2):
+    """Simple two-column roster for finished teams (Random / Auction / draft)."""
+    t1 = "\n".join(get_player_name(p) for p in team1) or "—"
+    t2 = "\n".join(get_player_name(p) for p in team2) or "—"
+    return f"🔴 **Team 1**\n{t1}\n\n🔵 **Team 2**\n{t2}"
+
+
+def _ready_text(team1, team2, game_map):
+    """The 'teams are complete, go play' announcement, shared by all pick methods."""
+    map_line = f"\n🗺️ Map: **{game_map}**" if game_map else ""
+    return (
+        f"🏆 **Teams are complete!**{map_line}\n\n{_teams_overview(team1, team2)}\n\n"
+        f"🎮 **Good luck and have fun!**\n"
+        f"When the game is over, a captain reports the result with `/result <winning team>`."
+    )
+
+
+def _register_match(key, captain1, captain2, team1, team2, game_map):
+    """Record a finished set of teams as an active match and clear the lobby/draft."""
+    cid, mode = key
+    active_matches[key] = {
+        "channel_id": cid,
+        "mode": mode,
+        "team1": team1,
+        "team2": team2,
+        "captain1": captain1,
+        "captain2": captain2,
+        "map": game_map,
+    }
+    drafts.pop(key, None)
+    lobbies.pop(key, None)
+
+
+def _snake_order(first_team, num_picks):
+    """Snake pick order (list of team numbers) for `num_picks` players.
+
+    Team `first_team` picks first, then it snakes: A, B, B, A, A, B, B, A, ...
+    Each round of two reverses, which keeps both teams equal for the even pick
+    counts a draft always has (2 * (team_size - 1) players to pick).
+    """
+    other = 2 if first_team == 1 else 1
+    order = []
+    round_i = 0
+    while len(order) < num_picks:
+        pair = [first_team, other] if round_i % 2 == 0 else [other, first_team]
+        order.extend(pair)
+        round_i += 1
+    return order[:num_picks]
 
 
 def get_draft_list(draft):
@@ -35,7 +85,7 @@ async def start_map_ban(channel, mode, first_banner, second_banner, on_complete)
 
     class MapBanView(discord.ui.View):
         def __init__(self):
-            super().__init__(timeout=60)
+            super().__init__(timeout=120)
             self.maps = maps.copy()
             self.turn = 0
             self.banned = []
@@ -212,29 +262,25 @@ def setup(bot):
             draft["team2"].append(player)
 
         draft["remaining"].remove(player)
+        draft["pick_index"] += 1
 
-        # Snake endgame: when 3 remain, the second-pick captain picks 2 in a row and
-        # the first-pick captain is auto-given the last player (compensates first pick).
-        rem = len(draft["remaining"])
-        other = 2 if current == 1 else 1
+        # True snake draft: follow the precomputed order (A, B, B, A, A, B, B, A...).
+        # When only one player is left, auto-assign them to whichever team is next in
+        # the snake order (saves a meaningless forced pick; keeps teams balanced).
         auto_assigned = None
-        bonus_pick = False
-        if rem == 2:
-            draft["turn"] = current      # same (second-pick) captain picks again
-            bonus_pick = True
-        elif rem == 1:
-            auto_assigned = draft["remaining"].pop()   # last player -> first-pick captain
-            (draft["team1"] if other == 1 else draft["team2"]).append(auto_assigned)
-        elif rem > 2:
-            draft["turn"] = other        # normal alternation
+        if len(draft["remaining"]) == 1:
+            next_team = draft["pick_order"][draft["pick_index"]]
+            auto_assigned = draft["remaining"].pop()
+            (draft["team1"] if next_team == 1 else draft["team2"]).append(auto_assigned)
+        elif draft["remaining"]:
+            draft["turn"] = draft["pick_order"][draft["pick_index"]]
 
         if draft["remaining"]:
             next_captain = draft["captain1"] if draft["turn"] == 1 else draft["captain2"]
-            bonus = " **(bonus pick — you pick again!)**" if bonus_pick else ""
             await interaction.response.send_message(
                 f"✅ {get_player_name(player)} was picked!\n\n"
                 f"{get_draft_list(draft)}\n\n"
-                f"🎯 <@{next_captain.id}>, your turn to pick!{bonus}\n"
+                f"🎯 <@{next_captain.id}>, your turn to pick!\n"
                 f"Use `/pick PlayerName`"
             )
             return
@@ -243,16 +289,8 @@ def setup(bot):
         # Keyed by (channel_id, mode) so concurrent matches never collide.
         game_map = draft.get("map")
         key = (draft["channel_id"], draft["mode"])
-        active_matches[key] = {
-            "channel_id": draft["channel_id"],
-            "mode": draft["mode"],
-            "team1": draft["team1"],
-            "team2": draft["team2"],
-            "captain1": draft["captain1"],
-            "captain2": draft["captain2"],
-            "map": game_map,
-        }
-        drafts.pop(key, None)
+        team1, team2 = draft["team1"], draft["team2"]
+        _register_match(key, draft["captain1"], draft["captain2"], team1, team2, game_map)
 
         pick_msg = f"✅ {get_player_name(player)} was picked!"
         if auto_assigned is not None:
@@ -260,9 +298,6 @@ def setup(bot):
                 f"\n🤖 {get_player_name(auto_assigned)} was auto-assigned "
                 f"(last remaining player)."
             )
-        map_line = f"\n🗺️ Map: **{game_map}**" if game_map else ""
         await interaction.response.send_message(
-            f"{pick_msg}\n\n🏆 **Teams are complete!**{map_line}\n\n{get_draft_list(draft)}\n\n"
-            f"🎮 **Everything is set — good luck and have fun!**\n"
-            f"When the game is over, a captain reports the result with `/result <winning team>`."
+            f"{pick_msg}\n\n{_ready_text(team1, team2, game_map)}"
         )

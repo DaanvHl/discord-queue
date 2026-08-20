@@ -19,7 +19,14 @@ from discord.ext import tasks
 from checks import ensure_organizer, ensure_queue_channel
 from config import GAME_MODES, QUEUE_INACTIVITY_SECONDS
 from db import get_player_name, is_registered
-from features.draft import get_draft_list, start_map_ban
+from features.draft import (
+    _register_match,
+    _ready_text,
+    _snake_order,
+    _teams_overview,
+    get_draft_list,
+    start_map_ban,
+)
 from state import (
     active_matches,
     drafts,
@@ -231,6 +238,7 @@ def _begin_draft(key, red_captain, blue_captain, first_picker):
     random.shuffle(remaining)
 
     turn = 1 if first_picker == red_captain else 2
+    pick_order = _snake_order(turn, len(remaining))
 
     drafts[key] = {
         "channel_id": cid,
@@ -241,6 +249,8 @@ def _begin_draft(key, red_captain, blue_captain, first_picker):
         "team2": [blue_captain],
         "remaining": remaining,
         "turn": turn,
+        "pick_order": pick_order,
+        "pick_index": 0,
         "map": lobby.get("map"),
     }
 
@@ -299,26 +309,18 @@ class _TeamSelectView(discord.ui.View):
         picker_marker = "🔴" if color == "red" else "🔵"
         note = (
             f"{picker_marker} **{get_player_name(self.picker)}** chose "
-            f"**{color.capitalize()}**.\n"
-            f"🎯 **{get_player_name(self.other)}** gets first pick."
+            f"**{color.capitalize()}**.\n\n"
+            "🧩 A captain now picks how to build the teams:"
         )
-        draft_embed = _begin_draft(self.key, red_captain, blue_captain, first_picker=self.other)
-        if draft_embed is None:
-            cancelled = "❌ This match was cleared by an admin."
-            if interaction is not None:
-                await interaction.response.edit_message(content=cancelled, embed=None, view=None)
-            elif self.message is not None:
-                await self.message.edit(content=cancelled, embed=None, view=None)
-            self.stop()
-            return
-
-        pick_ping = f"🎯 <@{self.other.id}>, you have first pick! Use `/pick PlayerName`."
+        method_view = _MethodSelectView(
+            self.key, red_captain, blue_captain, first_picker=self.other
+        )
         if interaction is not None:
-            await interaction.response.edit_message(content=note, embed=None, view=self)
-            await interaction.channel.send(content=pick_ping, embed=draft_embed)
+            await interaction.response.edit_message(
+                content=note, embed=method_view.embed(), view=method_view
+            )
         elif self.message is not None:
-            await self.message.edit(content=note, embed=None, view=self)
-            await self.message.channel.send(content=pick_ping, embed=draft_embed)
+            await self.message.edit(content=note, embed=method_view.embed(), view=method_view)
         self.stop()
 
     @discord.ui.button(label="Red", style=discord.ButtonStyle.danger, emoji="🔴")
@@ -344,6 +346,396 @@ class _TeamSelectView(discord.ui.View):
         if self.done:
             return
         await self._finish("red", interaction=None)
+
+
+# --------------------------------------------------------------------------
+# Team-picking method selection: Random / Snake / Auction
+# --------------------------------------------------------------------------
+
+class _MethodSelectView(discord.ui.View):
+    """Let a captain choose how the teams get built, after sides are picked."""
+
+    def __init__(self, key, red_captain, blue_captain, first_picker):
+        super().__init__(timeout=None)
+        self.key = key
+        self.red_captain = red_captain
+        self.blue_captain = blue_captain
+        self.first_picker = first_picker
+
+    def embed(self):
+        return discord.Embed(
+            title="🧩 Choose team-picking method",
+            description=(
+                "A **captain** picks how to build the teams:\n\n"
+                "🎲 **Random** — shuffle players into two teams (with reroll voting)\n"
+                "📋 **Snake Draft** — captains take turns picking (A, B, B, A…)\n"
+                "💰 **Auction** — captains bid coins on players"
+            ),
+            color=discord.Color.blurple(),
+        )
+
+    async def _guard(self, interaction):
+        if self.key not in lobbies:
+            await interaction.response.edit_message(
+                content="❌ This match was cleared.", embed=None, view=None
+            )
+            self.stop()
+            return False
+        if interaction.user.id not in (self.red_captain.id, self.blue_captain.id):
+            await interaction.response.send_message(
+                "❌ Only a captain chooses the picking method.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Random", emoji="🎲", style=discord.ButtonStyle.secondary)
+    async def random_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        self.stop()
+        await _start_random(interaction, self.key, self.red_captain, self.blue_captain)
+
+    @discord.ui.button(label="Snake Draft", emoji="📋", style=discord.ButtonStyle.primary)
+    async def snake_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        self.stop()
+        draft_embed = _begin_draft(
+            self.key, self.red_captain, self.blue_captain, first_picker=self.first_picker
+        )
+        if draft_embed is None:
+            await interaction.response.edit_message(
+                content="❌ This match was cleared.", embed=None, view=None
+            )
+            return
+        await interaction.response.edit_message(
+            content=f"📋 **Snake draft** — 🎯 {get_player_name(self.first_picker)} picks first.",
+            embed=None,
+            view=None,
+        )
+        await interaction.channel.send(
+            content=f"🎯 <@{self.first_picker.id}>, you have first pick! Use `/pick PlayerName`.",
+            embed=draft_embed,
+        )
+
+    @discord.ui.button(label="Auction", emoji="💰", style=discord.ButtonStyle.success)
+    async def auction_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._guard(interaction):
+            return
+        self.stop()
+        await _start_auction(interaction, self.key, self.red_captain, self.blue_captain)
+
+
+async def _start_random(interaction, key, red_captain, blue_captain):
+    lobby = lobbies.get(key)
+    if lobby is None:
+        await interaction.response.edit_message(
+            content="❌ This match was cleared.", embed=None, view=None
+        )
+        return
+    others = [
+        p for p in lobby["players"]
+        if p.id not in (red_captain.id, blue_captain.id)
+    ]
+    view = _RandomTeamsView(key, red_captain, blue_captain, others, lobby.get("map"))
+    view.shuffle()
+    await interaction.response.edit_message(content=None, embed=view.embed(), view=view)
+
+
+class _RandomTeamsView(discord.ui.View):
+    """Random teams with a 'vote reroll' button (3 votes reshuffles) and captain accept."""
+
+    REROLL_THRESHOLD = 3
+
+    def __init__(self, key, red_captain, blue_captain, others, game_map):
+        super().__init__(timeout=None)
+        self.key = key
+        self.red_captain = red_captain
+        self.blue_captain = blue_captain
+        self.others = list(others)
+        self.game_map = game_map
+        self.team1 = [red_captain]
+        self.team2 = [blue_captain]
+        self.reroll_votes = set()
+        self.note = ""
+
+    def _participants(self):
+        return [self.red_captain, self.blue_captain] + self.others
+
+    def shuffle(self):
+        pool = list(self.others)
+        random.shuffle(pool)
+        half = len(pool) // 2
+        self.team1 = [self.red_captain] + pool[:half]
+        self.team2 = [self.blue_captain] + pool[half:]
+        self.reroll_votes.clear()
+
+    def embed(self):
+        desc = (f"🗺️ Map: **{self.game_map}**\n\n" if self.game_map else "") + \
+            _teams_overview(self.team1, self.team2)
+        embed = discord.Embed(title="🎲 Random Teams", description=desc,
+                              color=discord.Color.blurple())
+        embed.add_field(
+            name="🔁 Reroll votes",
+            value=f"**{len(self.reroll_votes)}/{self.REROLL_THRESHOLD}** — vote to shuffle again",
+            inline=False,
+        )
+        if self.note:
+            embed.add_field(name="​", value=self.note, inline=False)
+        embed.set_footer(text="A captain clicks Accept to lock these teams in.")
+        return embed
+
+    async def _alive(self, interaction):
+        if self.key not in lobbies:
+            await interaction.response.edit_message(
+                content="❌ This match was cleared.", embed=None, view=None
+            )
+            self.stop()
+            return False
+        return True
+
+    @discord.ui.button(label="Vote Reroll", emoji="🔁", style=discord.ButtonStyle.secondary)
+    async def reroll_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._alive(interaction):
+            return
+        if not any(u.id == interaction.user.id for u in self._participants()):
+            await interaction.response.send_message(
+                "❌ Only players in this match can vote.", ephemeral=True
+            )
+            return
+        if interaction.user.id in self.reroll_votes:
+            await interaction.response.send_message(
+                "❌ You already voted to reroll.", ephemeral=True
+            )
+            return
+        self.reroll_votes.add(interaction.user.id)
+        if len(self.reroll_votes) >= self.REROLL_THRESHOLD:
+            self.shuffle()  # clears votes
+            self.note = "🔁 **Teams rerolled!**"
+        else:
+            self.note = ""
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Accept Teams", emoji="✅", style=discord.ButtonStyle.success)
+    async def accept_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._alive(interaction):
+            return
+        if interaction.user.id not in (self.red_captain.id, self.blue_captain.id):
+            await interaction.response.send_message(
+                "❌ Only a captain can accept the teams.", ephemeral=True
+            )
+            return
+        self.stop()
+        _register_match(
+            self.key, self.red_captain, self.blue_captain,
+            self.team1, self.team2, self.game_map,
+        )
+        self.note = "✅ **Teams locked in!**"
+        await interaction.response.edit_message(embed=self.embed(), view=None)
+        await interaction.channel.send(_ready_text(self.team1, self.team2, self.game_map))
+
+
+async def _start_auction(interaction, key, red_captain, blue_captain):
+    lobby = lobbies.get(key)
+    if lobby is None:
+        await interaction.response.edit_message(
+            content="❌ This match was cleared.", embed=None, view=None
+        )
+        return
+    _cid, mode = key
+    team_size = GAME_MODES[mode] // 2
+    pool = [
+        p for p in lobby["players"]
+        if p.id not in (red_captain.id, blue_captain.id)
+    ]
+    view = _AuctionView(key, red_captain, blue_captain, pool, lobby.get("map"), team_size)
+    await interaction.response.edit_message(content=None, embed=view.embed(), view=view)
+
+
+class _AuctionView(discord.ui.View):
+    """List-style auction: each player goes up for bid; highest bidder wins and pays.
+
+    Both captains start with BUDGET coins. When a team fills, the rest auto-fill the
+    other team. Players nobody bids on go free to whichever team has fewer players.
+    """
+
+    BUDGET = 25
+
+    def __init__(self, key, red_captain, blue_captain, pool, game_map, team_size):
+        super().__init__(timeout=None)
+        self.key = key
+        self.red_captain = red_captain
+        self.blue_captain = blue_captain
+        self.game_map = game_map
+        self.team_size = team_size
+        self.pool = list(pool)
+        random.shuffle(self.pool)
+        self.idx = 0
+        self.team1 = [red_captain]
+        self.team2 = [blue_captain]
+        self.coins = {red_captain.id: self.BUDGET, blue_captain.id: self.BUDGET}
+        self.high_bid = 0
+        self.high_bidder = None      # captain object
+        self.passed = set()          # captain ids who passed on the current player
+
+    # ---- state helpers ----
+    @property
+    def current(self):
+        return self.pool[self.idx] if self.idx < len(self.pool) else None
+
+    def _captain_obj(self, user):
+        return self.red_captain if user.id == self.red_captain.id else self.blue_captain
+
+    def _team_of(self, cap):
+        return self.team1 if cap.id == self.red_captain.id else self.team2
+
+    def _team_full(self, cap):
+        return len(self._team_of(cap)) >= self.team_size
+
+    def _emptier_captain(self):
+        return self.red_captain if len(self.team1) <= len(self.team2) else self.blue_captain
+
+    def _assign(self, player, cap, cost):
+        self._team_of(cap).append(player)
+        self.coins[cap.id] -= cost
+        self.idx += 1
+        self.high_bid = 0
+        self.high_bidder = None
+        self.passed = set()
+
+    def _auto_fill(self):
+        """Once a team is full, the remaining players all go to the other team."""
+        while self.idx < len(self.pool):
+            if len(self.team1) >= self.team_size:
+                self.team2.append(self.pool[self.idx]); self.idx += 1
+            elif len(self.team2) >= self.team_size:
+                self.team1.append(self.pool[self.idx]); self.idx += 1
+            else:
+                break
+
+    def embed(self):
+        cur = self.current
+        embed = discord.Embed(title="💰 Player Auction", color=discord.Color.gold())
+        if self.game_map:
+            embed.description = f"🗺️ Map: **{self.game_map}**"
+        embed.add_field(
+            name="💰 Coins left",
+            value=(
+                f"🔴 {get_player_name(self.red_captain)}: **{self.coins[self.red_captain.id]}**\n"
+                f"🔵 {get_player_name(self.blue_captain)}: **{self.coins[self.blue_captain.id]}**"
+            ),
+            inline=False,
+        )
+        if cur is not None:
+            bid_line = (
+                f"Current bid: **{self.high_bid}** by {get_player_name(self.high_bidder)}"
+                if self.high_bidder is not None else "No bids yet — bid or pass"
+            )
+            embed.add_field(name=f"🎯 Up for bid: {get_player_name(cur)}", value=bid_line, inline=False)
+        embed.add_field(
+            name="🔴 Team 1",
+            value="\n".join(get_player_name(p) for p in self.team1) or "—",
+            inline=True,
+        )
+        embed.add_field(
+            name="🔵 Team 2",
+            value="\n".join(get_player_name(p) for p in self.team2) or "—",
+            inline=True,
+        )
+        left = max(0, len(self.pool) - self.idx - (1 if cur is not None else 0))
+        embed.set_footer(text=f"{left} players left after this · +1/+5 to bid, Pass to skip")
+        return embed
+
+    async def _guard(self, interaction):
+        if self.key not in lobbies:
+            await interaction.response.edit_message(
+                content="❌ This match was cleared.", embed=None, view=None
+            )
+            self.stop()
+            return False
+        if interaction.user.id not in (self.red_captain.id, self.blue_captain.id):
+            await interaction.response.send_message(
+                "❌ Only the captains can bid.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _render(self, interaction):
+        """Auto-fill on a full team, then finish or refresh the panel."""
+        self._auto_fill()
+        if self.current is None:
+            self.stop()
+            _register_match(
+                self.key, self.red_captain, self.blue_captain,
+                self.team1, self.team2, self.game_map,
+            )
+            await interaction.response.edit_message(
+                content="✅ **Auction complete!**", embed=self.embed(), view=None
+            )
+            await interaction.channel.send(_ready_text(self.team1, self.team2, self.game_map))
+        else:
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def _bid(self, interaction, inc):
+        if not await self._guard(interaction):
+            return
+        cap = self._captain_obj(interaction.user)
+        if self._team_full(cap):
+            await interaction.response.send_message(
+                "❌ Your team is already full.", ephemeral=True
+            )
+            return
+        if self.high_bidder is not None and self.high_bidder.id == cap.id:
+            await interaction.response.send_message(
+                "❌ You're already the high bidder.", ephemeral=True
+            )
+            return
+        new_bid = self.high_bid + inc
+        if new_bid > self.coins[cap.id]:
+            await interaction.response.send_message(
+                f"❌ You only have {self.coins[cap.id]} coins.", ephemeral=True
+            )
+            return
+        self.high_bid = new_bid
+        self.high_bidder = cap
+        self.passed = set()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def _pass(self, interaction):
+        if not await self._guard(interaction):
+            return
+        cap = self._captain_obj(interaction.user)
+        cur = self.current
+        if self.high_bidder is not None:
+            if self.high_bidder.id == cap.id:
+                await interaction.response.send_message(
+                    "❌ You're the high bidder — you can't pass.", ephemeral=True
+                )
+                return
+            # The challenger concedes -> the high bidder wins and pays.
+            self._assign(cur, self.high_bidder, self.high_bid)
+            await self._render(interaction)
+            return
+        # No bids yet on this player.
+        self.passed.add(cap.id)
+        if len(self.passed) >= 2:
+            # Both captains passed -> free to the team with fewer players.
+            self._assign(cur, self._emptier_captain(), 0)
+            await self._render(interaction)
+        else:
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Bid +1", emoji="💰", style=discord.ButtonStyle.primary)
+    async def bid1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._bid(interaction, 1)
+
+    @discord.ui.button(label="Bid +5", emoji="💰", style=discord.ButtonStyle.primary)
+    async def bid5(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._bid(interaction, 5)
+
+    @discord.ui.button(label="Pass", emoji="⏭️", style=discord.ButtonStyle.secondary)
+    async def pass_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pass(interaction)
 
 
 async def _advance_to_map_ban(key, channel):

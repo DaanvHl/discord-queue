@@ -46,18 +46,23 @@ TOPICS = {
             ("🚪 Step Down", "Withdraw as captain."),
             ("🎲 Roll Captains", "Pick two random captains from the queue — rerollable."),
             ("🔒 Lock In", "Once two captains are set, lock them in to start the map ban."),
-            ("Then", "Map ban → the **first** captain picks a side (🔴/🔵) → the **second** "
-                     "captain gets first pick in the draft."),
+            ("Then", "Map ban → the **first** captain picks a side (🔴/🔵) → a captain chooses "
+                     "how to build the teams: 🎲 Random, 📋 Snake draft, or 💰 Auction."),
         ],
     ),
     "draft": (
-        "📋 Captain Draft",
-        "Captains take turns picking players for their teams.",
+        "🧩 Building Teams",
+        "After sides are chosen, a captain picks **how** the teams get built — three options:",
         [
-            ("/pick `<player name>`", "Pick an available player onto your team (use their registered name)."),
-            ("Turn order", "The captain with first pick starts (see `/help captains`), then it alternates."),
-            ("Snake endgame", "When 3 players remain, the **second-pick** captain picks 2, and the **first-pick** captain is auto-given the last one — balances the first-pick advantage."),
-            ("Next step", "The map was already chosen earlier, so once teams are complete the match is ready to play."),
+            ("🎲 Random", "Players are shuffled into two teams. Anyone in the match can **Vote Reroll** — "
+                          "**3 votes** reshuffles. A captain clicks **Accept Teams** to lock them in."),
+            ("📋 Snake Draft", "Captains take turns picking with `/pick <name>`. The first picker starts, "
+                              "then it **snakes**: A, B, B, A, A, B, B, A… so the first-pick advantage evens out. "
+                              "The last remaining player is auto-assigned."),
+            ("💰 Auction", "Each captain gets **25 coins** and bids on players one at a time (**+1 / +5**); "
+                          "highest bid wins and pays. Out of coins? **Pass**. When a team is full, the rest "
+                          "auto-fill the other team."),
+            ("Next step", "The map was chosen earlier, so once teams are complete the match is ready to play."),
         ],
     ),
     "maps": (
@@ -69,7 +74,7 @@ TOPICS = {
                              "bans one, then the **second**; the **remaining map is played**."),
             ("Buttons", "Bans are done by clicking the map buttons — only the captain whose turn it "
                         "is can ban."),
-            ("Timeout", "Each captain has **60 seconds**; if they don't act, a random map is banned "
+            ("Timeout", "Each captain has **120 seconds**; if they don't act, a random map is banned "
                         "for them."),
         ],
     ),
