@@ -555,8 +555,10 @@ async def _start_auction(interaction, key, red_captain, blue_captain):
 class _AuctionView(discord.ui.View):
     """List-style auction: each player goes up for bid; highest bidder wins and pays.
 
-    Both captains start with BUDGET coins. When a team fills, the rest auto-fill the
-    other team. Players nobody bids on go free to whichever team has fewer players.
+    Both captains start with BUDGET coins. If both captains skip a player, that player
+    goes to the **back of the line**, so wanted players get auctioned first. When a team
+    fills, the rest auto-fill the other team; if a whole lap passes with no bids on
+    anyone, the leftovers are split evenly and the auction ends.
     """
 
     BUDGET = 25
@@ -568,20 +570,21 @@ class _AuctionView(discord.ui.View):
         self.blue_captain = blue_captain
         self.game_map = game_map
         self.team_size = team_size
-        self.pool = list(pool)
-        random.shuffle(self.pool)
-        self.idx = 0
+        self.queue = list(pool)      # front of the queue is the player up for bid
+        random.shuffle(self.queue)
         self.team1 = [red_captain]
         self.team2 = [blue_captain]
         self.coins = {red_captain.id: self.BUDGET, blue_captain.id: self.BUDGET}
         self.high_bid = 0
         self.high_bidder = None      # captain object
         self.passed = set()          # captain ids who passed on the current player
+        self.skips_since_bid = 0     # consecutive skip-rotations with no bid (loop guard)
+        self.note = ""               # last event, shown on the panel
 
     # ---- state helpers ----
     @property
     def current(self):
-        return self.pool[self.idx] if self.idx < len(self.pool) else None
+        return self.queue[0] if self.queue else None
 
     def _captain_obj(self, user):
         return self.red_captain if user.id == self.red_captain.id else self.blue_captain
@@ -592,26 +595,39 @@ class _AuctionView(discord.ui.View):
     def _team_full(self, cap):
         return len(self._team_of(cap)) >= self.team_size
 
-    def _emptier_captain(self):
-        return self.red_captain if len(self.team1) <= len(self.team2) else self.blue_captain
-
-    def _assign(self, player, cap, cost):
-        self._team_of(cap).append(player)
-        self.coins[cap.id] -= cost
-        self.idx += 1
+    def _reset_bidding(self):
         self.high_bid = 0
         self.high_bidder = None
         self.passed = set()
 
+    def _assign(self, cap, cost):
+        """Give the current (front) player to a captain's team for `cost` coins."""
+        player = self.queue.pop(0)
+        self._team_of(cap).append(player)
+        self.coins[cap.id] -= cost
+        self.skips_since_bid = 0
+        self._reset_bidding()
+        return player
+
+    def _emptier_side(self):
+        """The team with fewer players that isn't full (tie -> Team 1)."""
+        if len(self.team1) >= self.team_size:
+            return self.team2
+        if len(self.team2) >= self.team_size:
+            return self.team1
+        return self.team1 if len(self.team1) <= len(self.team2) else self.team2
+
     def _auto_fill(self):
         """Once a team is full, the remaining players all go to the other team."""
-        while self.idx < len(self.pool):
-            if len(self.team1) >= self.team_size:
-                self.team2.append(self.pool[self.idx]); self.idx += 1
-            elif len(self.team2) >= self.team_size:
-                self.team1.append(self.pool[self.idx]); self.idx += 1
-            else:
-                break
+        while self.queue and (len(self.team1) >= self.team_size or len(self.team2) >= self.team_size):
+            target = self.team2 if len(self.team1) >= self.team_size else self.team1
+            target.append(self.queue.pop(0))
+
+    def _distribute_remaining(self):
+        """Split every remaining player evenly across the teams (used when nobody bids)."""
+        while self.queue:
+            self._emptier_side().append(self.queue.pop(0))
+        self._reset_bidding()
 
     def embed(self):
         cur = self.current
@@ -626,6 +642,8 @@ class _AuctionView(discord.ui.View):
             ),
             inline=False,
         )
+        if self.note:
+            embed.add_field(name="​", value=self.note, inline=False)
         if cur is not None:
             bid_line = (
                 f"Current bid: **{self.high_bid}** by {get_player_name(self.high_bidder)}"
@@ -642,7 +660,7 @@ class _AuctionView(discord.ui.View):
             value="\n".join(get_player_name(p) for p in self.team2) or "—",
             inline=True,
         )
-        left = max(0, len(self.pool) - self.idx - (1 if cur is not None else 0))
+        left = max(0, len(self.queue) - 1)
         embed.set_footer(text=f"{left} players left after this · +1/+5 to bid, Pass to skip")
         return embed
 
@@ -699,6 +717,7 @@ class _AuctionView(discord.ui.View):
         self.high_bid = new_bid
         self.high_bidder = cap
         self.passed = set()
+        self.skips_since_bid = 0
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
     async def _pass(self, interaction):
@@ -713,14 +732,24 @@ class _AuctionView(discord.ui.View):
                 )
                 return
             # The challenger concedes -> the high bidder wins and pays.
-            self._assign(cur, self.high_bidder, self.high_bid)
+            winner, price = self.high_bidder, self.high_bid
+            self._assign(winner, price)
+            self.note = f"💰 **{get_player_name(cur)}** won by {get_player_name(winner)} for {price}."
             await self._render(interaction)
             return
         # No bids yet on this player.
         self.passed.add(cap.id)
         if len(self.passed) >= 2:
-            # Both captains passed -> free to the team with fewer players.
-            self._assign(cur, self._emptier_captain(), 0)
+            # Both captains skipped -> send this player to the back of the line so
+            # wanted players get auctioned first.
+            self.queue.append(self.queue.pop(0))
+            self.skips_since_bid += 1
+            self._reset_bidding()
+            self.note = f"⏭️ **{get_player_name(cur)}** skipped — sent to the back."
+            if self.skips_since_bid >= len(self.queue):
+                # A whole lap with no bids on anyone -> split the rest evenly and finish.
+                self._distribute_remaining()
+                self.note = "⏭️ No bids on the remaining players — split evenly."
             await self._render(interaction)
         else:
             await interaction.response.edit_message(embed=self.embed(), view=self)
