@@ -11,7 +11,8 @@ Two kinds of roles, none hoisted:
     color always reflects their best rank. Using a single colored role means the
     color works regardless of role position (no hierarchy ordering required).
 
-The bot creates and maintains all of these automatically.
+The bot creates any that are missing on startup, but never modifies existing
+roles — colours, positions and hoist set by admins survive redeploys.
 """
 import discord
 
@@ -77,35 +78,37 @@ def all_role_names():
 
 
 async def _ensure_role(guild, existing, name, colour, reason):
-    """Create the role if missing, else fix its colour/hoist. Returns the role or None."""
-    role = existing.get(name)
-    if role is None:
-        try:
-            return await guild.create_role(
-                name=name,
-                colour=colour,
-                hoist=False,
-                mentionable=False,
-                reason=reason,
-            )
-        except discord.Forbidden:
-            print(
-                f"[ranks] Missing 'Manage Roles' permission - cannot create '{name}'. "
-                "Grant the bot Manage Roles and restart."
-            )
-            return None
+    """Create the role only if missing; never modify an existing one.
 
-    # Keep existing roles consistent (colour + not hoisted).
-    if role.colour != colour or role.hoist:
-        try:
-            await role.edit(colour=colour, hoist=False, reason=reason)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-    return role
+    Existing roles are left exactly as they are (colour, position, hoist), so
+    manual tweaks by server admins survive redeploys. A role is only ever given
+    the bot's default colour/hoist at initial creation.
+    """
+    role = existing.get(name)
+    if role is not None:
+        return role  # already exists — leave it untouched
+
+    try:
+        return await guild.create_role(
+            name=name,
+            colour=colour,
+            hoist=False,
+            mentionable=False,
+            reason=reason,
+        )
+    except discord.Forbidden:
+        print(
+            f"[ranks] Missing 'Manage Roles' permission - cannot create '{name}'. "
+            "Grant the bot Manage Roles and restart."
+        )
+        return None
 
 
 async def ensure_rank_roles(guild):
-    """Create/normalise all rank roles. Returns True on success, None if blocked."""
+    """Create any missing rank roles (never touches existing ones).
+
+    Returns True on success, None if blocked by missing permissions.
+    """
     existing = {r.name: r for r in guild.roles}
     colourless = discord.Colour.default()
 
