@@ -226,6 +226,42 @@ def _captain_embed(lobby, locked=False):
     return embed
 
 
+def _lobby_gone(key, lobby):
+    """True if the lobby was cleared or replaced (e.g. an organizer /reset-captains).
+
+    Phase views capture the lobby object they belong to and use this so stale
+    buttons from a superseded flow refuse to act instead of resurrecting it.
+    """
+    return lobbies.get(key) is not lobby
+
+
+def _match_players_for_key(key):
+    """Players in a forming/active match for this key (any stage after /start), or None."""
+    if key in lobbies:
+        return list(lobbies[key]["players"])
+    if key in drafts:
+        d = drafts[key]
+        return list(d["team1"]) + list(d["team2"]) + list(d["remaining"])
+    if key in active_matches:
+        m = active_matches[key]
+        return list(m["team1"]) + list(m["team2"])
+    return None
+
+
+def _find_player_match_key(user, channel_id):
+    """The (channel_id, mode) key of the forming/active match the user is part of, or None.
+
+    Covers every stage after /start (lobby, draft, or active match) in that channel.
+    """
+    for key in list(lobbies) + list(drafts) + list(active_matches):
+        if key[0] != channel_id:
+            continue
+        players = _match_players_for_key(key)
+        if players and any(u.id == user.id for u in players):
+            return key
+    return None
+
+
 def _begin_draft(key, red_captain, blue_captain, first_picker):
     """Turn a lobby into a captain draft with the chosen sides; return the draft embed."""
     cid, mode = key
@@ -295,6 +331,7 @@ class _TeamSelectView(discord.ui.View):
         self.other = other
         self.message = None
         self.done = False
+        self._lobby = lobbies.get(key)   # the lobby this view belongs to
 
     async def _finish(self, color, interaction=None):
         self.done = True
@@ -332,6 +369,13 @@ class _TeamSelectView(discord.ui.View):
         await self._on_click(interaction, "blue")
 
     async def _on_click(self, interaction, color):
+        if _lobby_gone(self.key, self._lobby):
+            self.done = True
+            self.stop()
+            await interaction.response.edit_message(
+                content="🔄 This match was reset.", embed=None, view=None
+            )
+            return
         if interaction.user.id != self.picker.id:
             await interaction.response.send_message(
                 f"❌ Only {get_player_name(self.picker)} picks the team.",
@@ -343,7 +387,7 @@ class _TeamSelectView(discord.ui.View):
         await self._finish(color, interaction)
 
     async def on_timeout(self):
-        if self.done:
+        if self.done or _lobby_gone(self.key, self._lobby):
             return
         await self._finish("red", interaction=None)
 
@@ -361,6 +405,7 @@ class _MethodSelectView(discord.ui.View):
         self.red_captain = red_captain
         self.blue_captain = blue_captain
         self.first_picker = first_picker
+        self._lobby = lobbies.get(key)   # the lobby this view belongs to
 
     def embed(self):
         return discord.Embed(
@@ -375,9 +420,9 @@ class _MethodSelectView(discord.ui.View):
         )
 
     async def _guard(self, interaction):
-        if self.key not in lobbies:
+        if _lobby_gone(self.key, self._lobby):
             await interaction.response.edit_message(
-                content="❌ This match was cleared.", embed=None, view=None
+                content="🔄 This match was reset.", embed=None, view=None
             )
             self.stop()
             return False
@@ -458,6 +503,7 @@ class _RandomTeamsView(discord.ui.View):
         self.team2 = [blue_captain]
         self.reroll_votes = set()
         self.note = ""
+        self._lobby = lobbies.get(key)   # the lobby this view belongs to
 
     def _participants(self):
         return [self.red_captain, self.blue_captain] + self.others
@@ -486,9 +532,9 @@ class _RandomTeamsView(discord.ui.View):
         return embed
 
     async def _alive(self, interaction):
-        if self.key not in lobbies:
+        if _lobby_gone(self.key, self._lobby):
             await interaction.response.edit_message(
-                content="❌ This match was cleared.", embed=None, view=None
+                content="🔄 This match was reset.", embed=None, view=None
             )
             self.stop()
             return False
@@ -580,6 +626,7 @@ class _AuctionView(discord.ui.View):
         self.passed = set()          # captain ids who passed on the current player
         self.skips_since_bid = 0     # consecutive skip-rotations with no bid (loop guard)
         self.note = ""               # last event, shown on the panel
+        self._lobby = lobbies.get(key)   # the lobby this view belongs to
 
     # ---- state helpers ----
     @property
@@ -665,9 +712,9 @@ class _AuctionView(discord.ui.View):
         return embed
 
     async def _guard(self, interaction):
-        if self.key not in lobbies:
+        if _lobby_gone(self.key, self._lobby):
             await interaction.response.edit_message(
-                content="❌ This match was cleared.", embed=None, view=None
+                content="🔄 This match was reset.", embed=None, view=None
             )
             self.stop()
             return False
@@ -775,6 +822,8 @@ async def _advance_to_map_ban(key, channel):
     cap1, cap2 = lobby["captains"][0], lobby["captains"][1]
 
     async def after_map_ban(selected_map):
+        if lobbies.get(key) is not lobby:
+            return  # match was reset/cleared while the map ban was open
         lobby["map"] = selected_map
         picker, other = lobby["captains"][0], lobby["captains"][1]
         view = _TeamSelectView(key, picker, other)
@@ -986,6 +1035,49 @@ def setup(bot):
             "more slots. Run `/start` when you're ready.\n\n"
             f"{_queue_text(key)}",
             view=_QueueView(key),
+        )
+
+    @bot.tree.command(
+        name="reset-captains",
+        description="Send your match back to captain selection",
+    )
+    async def reset_captains(interaction: discord.Interaction):
+        if not await ensure_queue_channel(interaction):
+            return
+
+        # Any player in the match can reset it (they can only be in one).
+        key = _find_player_match_key(interaction.user, interaction.channel.id)
+        if key is None:
+            await interaction.response.send_message(
+                "❌ You're not in a match in this channel.", ephemeral=True
+            )
+            return
+
+        mode = key[1]
+        players = _match_players_for_key(key)
+
+        # Tear down every stage of this match, then rebuild a fresh captain-select
+        # lobby. Replacing the lobby object also invalidates any buttons from the
+        # superseded flow (map ban / method select / draft / auction).
+        drafts.pop(key, None)
+        active_matches.pop(key, None)
+        pending_results.pop(key, None)
+        lobbies[key] = {
+            "channel_id": key[0],
+            "mode": mode,
+            "players": players,
+            "captains": [],
+            "map": None,
+            "locked": False,
+        }
+
+        await interaction.response.send_message(
+            content=(
+                f"🔄 **{mode}** was sent back to captain selection by "
+                f"{interaction.user.mention}. Pick captains again, or `/open` to reopen the queue."
+            ),
+            embed=_captain_embed(lobbies[key]),
+            view=_CaptainSelectView(key),
         )
 
     @bot.tree.command(
