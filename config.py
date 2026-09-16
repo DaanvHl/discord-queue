@@ -51,6 +51,16 @@ QUEUE_CHANNEL_ID = QUEUE_CHANNEL_IDS[0]
 _organizer = os.getenv("ORGANIZER_ROLE_ID")
 ORGANIZER_ROLE_ID = int(_organizer) if _organizer else None
 
+# Optional prefix on every rank-role name this bot manages. Lets a second bot for
+# a different format share the same server without its roles colliding with this
+# one's — e.g. ROLE_PREFIX="[M] " gives "[M] Ruby", "[M] Small · Gold". Default: none.
+ROLE_PREFIX = os.getenv("ROLE_PREFIX", "")
+
+# Optional decorative divider role the bot ensures exists (its position is left to
+# you to set once). Lets the rank roles sit under a header — e.g. "━━ Hard Queue ━━".
+# Default: none (no divider created).
+RANK_SEPARATOR_NAME = os.getenv("RANK_SEPARATOR_NAME") or None
+
 # Database file location. Defaults to a local file. When hosting, point this at a
 # persistent volume (e.g. DB_PATH=/data/players.db) so data survives redeploys.
 DB_PATH = os.getenv("DB_PATH", "players.db")

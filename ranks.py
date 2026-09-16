@@ -16,7 +16,7 @@ roles — colours, positions and hoist set by admins survive redeploys.
 """
 import discord
 
-from config import BRACKETS
+from config import BRACKETS, RANK_SEPARATOR_NAME, ROLE_PREFIX
 from db import get_points
 
 # Ranks from lowest to highest. Each entry is (minimum_points, name).
@@ -64,17 +64,17 @@ def rank_for_points(points) -> str:
 
 
 def section_role_name(section, rank) -> str:
-    return f"{SECTION_NAMES[section]} · {rank}"
+    return f"{ROLE_PREFIX}{SECTION_NAMES[section]} · {rank}"
 
 
 def tier_role_name(rank) -> str:
-    return rank
+    return f"{ROLE_PREFIX}{rank}"
 
 
 def all_role_names():
     """Every rank role name the bot manages (24 section + 8 tier)."""
     section = [section_role_name(s, r) for s in BRACKETS for r in _RANK_NAMES]
-    return section + list(_RANK_NAMES)
+    return section + [tier_role_name(r) for r in _RANK_NAMES]
 
 
 async def _ensure_role(guild, existing, name, colour, reason):
@@ -104,12 +104,38 @@ async def _ensure_role(guild, existing, name, colour, reason):
         return None
 
 
-async def ensure_rank_roles(guild):
-    """Create any missing rank roles (never touches existing ones).
+async def _migrate_role_prefix(guild, existing):
+    """Add ROLE_PREFIX to rank roles that were created before the prefix was set.
 
-    Returns True on success, None if blocked by missing permissions.
+    Rename-in-place, NAME ONLY — colour, position, hoist and members are all kept.
+    If a prefixed role is missing but its un-prefixed twin exists, that twin is
+    renamed, so switching an existing bot to a prefix never creates duplicates.
+    Idempotent: once renamed (or on a fresh bot), there's nothing to do.
+    """
+    if not ROLE_PREFIX:
+        return
+    for prefixed in all_role_names():
+        if prefixed in existing:
+            continue  # already has the prefix
+        legacy = prefixed[len(ROLE_PREFIX):]  # the same role name without the prefix
+        role = existing.get(legacy)
+        if role is None:
+            continue  # nothing to rename; it'll be created fresh below
+        try:
+            await role.edit(name=prefixed, reason="Prefix rank roles")
+            existing[prefixed] = existing.pop(legacy)  # keep the lookup map in sync
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+
+async def ensure_rank_roles(guild):
+    """Create any missing rank roles (never changes an existing role's colour/position).
+
+    If ROLE_PREFIX is set, existing un-prefixed rank roles are renamed in place first
+    (name only). Returns True on success, None if blocked by missing permissions.
     """
     existing = {r.name: r for r in guild.roles}
+    await _migrate_role_prefix(guild, existing)
     colourless = discord.Colour.default()
 
     # Section roles: colourless, one per (section, rank).
@@ -130,6 +156,14 @@ async def ensure_rank_roles(guild):
         )
         if role is None:
             return None
+
+    # Optional decorative divider role (empty, no permissions). Never assigned or
+    # positioned by the bot — drag it above the rank roles once; it then persists.
+    if RANK_SEPARATOR_NAME:
+        await _ensure_role(
+            guild, existing, RANK_SEPARATOR_NAME,
+            colourless, "Rank section divider",
+        )
 
     return True
 
@@ -157,7 +191,7 @@ async def update_member_ranks(guild, member):
             to_add.append(guild_roles[desired])
 
     # Single coloured tier role = highest rank across all sections.
-    tier_names = set(_RANK_NAMES)
+    tier_names = {tier_role_name(r) for r in _RANK_NAMES}
     desired_tier = tier_role_name(rank_for_points(best_points))
 
     for role in member.roles:
