@@ -77,7 +77,7 @@ def all_role_names():
     return section + [tier_role_name(r) for r in _RANK_NAMES]
 
 
-async def _ensure_role(guild, existing, name, colour, reason):
+async def _ensure_role(guild, existing, name, colour, reason, hoist=False):
     """Create the role only if missing; never modify an existing one.
 
     Existing roles are left exactly as they are (colour, position, hoist), so
@@ -92,7 +92,7 @@ async def _ensure_role(guild, existing, name, colour, reason):
         return await guild.create_role(
             name=name,
             colour=colour,
-            hoist=False,
+            hoist=hoist,
             mentionable=False,
             reason=reason,
         )
@@ -157,12 +157,13 @@ async def ensure_rank_roles(guild):
         if role is None:
             return None
 
-    # Optional decorative divider role (empty, no permissions). Never assigned or
-    # positioned by the bot — drag it above the rank roles once; it then persists.
+    # Optional header/divider role. Created hoisted so members who hold it group
+    # under it in the sidebar (that's what makes it a visible header). The bot
+    # never positions it — drag it where you want once; create-only keeps it there.
     if RANK_SEPARATOR_NAME:
         await _ensure_role(
             guild, existing, RANK_SEPARATOR_NAME,
-            colourless, "Rank section divider",
+            colourless, "Rank section header", hoist=True,
         )
 
     return True
@@ -200,6 +201,11 @@ async def update_member_ranks(guild, member):
     if desired_tier not in member_role_names and desired_tier in guild_roles:
         to_add.append(guild_roles[desired_tier])
 
+    # Header/divider role: every registered player holds it (never removed).
+    if (RANK_SEPARATOR_NAME and RANK_SEPARATOR_NAME in guild_roles
+            and RANK_SEPARATOR_NAME not in member_role_names):
+        to_add.append(guild_roles[RANK_SEPARATOR_NAME])
+
     try:
         if to_remove:
             await member.remove_roles(*to_remove, reason="Rank sync")
@@ -212,3 +218,23 @@ async def update_member_ranks(guild, member):
         )
     except discord.HTTPException as exc:
         print(f"[ranks] Failed to update ranks for {member}: {exc}")
+
+
+def _managed_role_names():
+    """Every role name the bot manages: rank roles plus the header, if any."""
+    names = set(all_role_names())
+    if RANK_SEPARATOR_NAME:
+        names.add(RANK_SEPARATOR_NAME)
+    return names
+
+
+async def remove_rank_roles(guild, member):
+    """Strip every rank role (and the header) from a member — used on unregister."""
+    managed = _managed_role_names()
+    to_remove = [r for r in member.roles if r.name in managed]
+    if not to_remove:
+        return
+    try:
+        await member.remove_roles(*to_remove, reason="Unregistered")
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[ranks] Could not remove rank roles from {member}: {exc}")

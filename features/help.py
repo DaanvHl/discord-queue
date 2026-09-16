@@ -118,6 +118,10 @@ TOPICS = {
             ("/register `<name>`", f"Sign up with your in-game name. Starts you at {STARTING_POINTS} "
                                    "points in every section and assigns your rank roles."),
             ("/rename `<name>`", "Change your registered name."),
+            ("/unregister", "Delete your registration and **all progress** (points, records, rank roles). "
+                            "Asks for confirmation first — this can't be undone."),
+            ("/sync-roles", "**(Admin/Organizer)** Re-sync rank roles for every registered player (handy after "
+                            "a rank-role change)."),
             ("/profile", "Show your registered name."),
             ("/stats", "Your points, rank and W/L for each section and format."),
             ("/leaderboard `<section>`", "Top 10 players in a section, with W/L."),

@@ -131,6 +131,20 @@ def rename_player(user_id, name):
     db.commit()
 
 
+def unregister_player(user_id):
+    """Delete a player and all their progress (ratings + per-format records)."""
+    cursor.execute("DELETE FROM ratings WHERE discord_id=?", (user_id,))
+    cursor.execute("DELETE FROM format_stats WHERE discord_id=?", (user_id,))
+    cursor.execute("DELETE FROM players WHERE discord_id=?", (user_id,))
+    db.commit()
+
+
+def get_registered_ids():
+    """Return the discord ids of every registered player."""
+    cursor.execute("SELECT discord_id FROM players")
+    return [row[0] for row in cursor.fetchall()]
+
+
 def get_player_name(user):
     """Registered name for a discord user, falling back to their display name."""
     cursor.execute("SELECT username FROM players WHERE discord_id=?", (user.id,))
