@@ -11,22 +11,23 @@ import discord
 from discord.ext import commands
 
 from config import GUILD_ID, TOKEN
-from features import draft, help, matches, queue, registration, stats
+from features import draft, help, matches, queue, registration, setups, stats
 from ranks import ensure_rank_roles
 from web import start_web_server
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Register every feature's commands.
-for feature in (registration, queue, draft, matches, stats, help):
+# Register every feature's commands. (setups only registers a command when the
+# external setups service is configured; otherwise it's a no-op.)
+for feature in (registration, queue, draft, matches, stats, help, setups):
     feature.setup(bot)
 
 
 async def setup_hook():
     """Start the embedded web server and background tasks alongside the bot."""
     try:
-        await start_web_server()
+        await start_web_server(bot)
     except Exception as exc:  # never let the web server break the bot
         print(f"[web] failed to start web server: {exc}")
 

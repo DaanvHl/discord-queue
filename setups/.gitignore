@@ -1,0 +1,12 @@
+# Node dependencies (run: npm install)
+node_modules/
+
+# Auto-downloaded cloudflared binary (tunnel.js fetches it on first run)
+tools/
+
+# Runtime data written by the bot (archive.js creates this)
+data/
+
+# Secrets / local env
+.env
+*.log

@@ -61,6 +61,13 @@ ROLE_PREFIX = os.getenv("ROLE_PREFIX", "")
 # Default: none (no divider created).
 RANK_SEPARATOR_NAME = os.getenv("RANK_SEPARATOR_NAME") or None
 
+# Optional: the external "setups" pick & ban service (a separate Node app). When
+# both are set, the /setups command and the result callback are enabled; unset =
+# the feature is completely off and the bot behaves exactly as before.
+SETUPS_API_URL = (os.getenv("SETUPS_API_URL", "").rstrip("/")) or None
+SETUPS_SECRET = os.getenv("SETUPS_SECRET") or None
+SETUPS_ENABLED = bool(SETUPS_API_URL and SETUPS_SECRET)
+
 # Database file location. Defaults to a local file. When hosting, point this at a
 # persistent volume (e.g. DB_PATH=/data/players.db) so data survives redeploys.
 DB_PATH = os.getenv("DB_PATH", "players.db")

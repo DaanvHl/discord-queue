@@ -1,0 +1,19 @@
+{
+  "name": "setups-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord bot that runs a Tanki Online pick & ban draft on a web page it serves itself.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "serve": "node server.js",
+    "deploy": "node deploy-commands.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "ws": "^8.21.1"
+  }
+}

@@ -7,13 +7,17 @@ import json
 import os
 import sqlite3
 
+import discord
 from aiohttp import web
 
-from config import BRACKETS, DB_PATH, GAME_MODES
+from config import BRACKETS, DB_PATH, GAME_MODES, SETUPS_ENABLED, SETUPS_SECRET
 from db import get_bracket
 from ranks import rank_for_points
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+# Set by start_web_server so the setups callback can post to a channel.
+_bot_client = None
 
 
 def _connect():
@@ -151,17 +155,78 @@ async def _handle_matches(request):
     return web.json_response(_matches())
 
 
+# --- Setups pick & ban callback (only wired up when the feature is enabled) ---
+
+def _build_setups_embed(data):
+    """Render a finished setups draft (host/guest bans + loadouts) as an embed."""
+    host, guest = data["host"], data["guest"]
+
+    def fmt_bans(side):
+        return ", ".join(f"~~{b['name']}~~" for b in side.get("bans", [])) or "_no bans_"
+
+    def fmt_setups(side):
+        lines = [
+            f"`{s['n']}.` {s.get('turret') or '—'} · {s.get('hull') or '—'} · {s.get('paint') or '_no paint_'}"
+            for s in side.get("setups", [])
+        ]
+        return "\n".join(lines) or "_no setups_"
+
+    embed = discord.Embed(
+        title="🎮 Setup Draft — complete",
+        description="Pick & ban finished. Here are both captains' loadouts.",
+        color=discord.Color.green(),
+    )
+    embed.add_field(name=f"🔵 {host['name']}",
+                    value=f"<@{host['discordId']}>\n{fmt_bans(host)}", inline=True)
+    embed.add_field(name=f"🔴 {guest['name']}",
+                    value=f"<@{guest['discordId']}>\n{fmt_bans(guest)}", inline=True)
+    embed.add_field(name="​", value="​", inline=False)
+    embed.add_field(name=f"{host['name']} setups", value=fmt_setups(host), inline=True)
+    embed.add_field(name=f"{guest['name']} setups", value=fmt_setups(guest), inline=True)
+    return embed
+
+
+async def _handle_setups_callback(request):
+    if request.headers.get("x-setups-secret") != SETUPS_SECRET:
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad json"}, status=400)
+
+    meta = data.get("meta") or {}
+    try:
+        channel_id = int(meta.get("channelId") or 0)
+    except (TypeError, ValueError):
+        channel_id = 0
+
+    if _bot_client is not None and channel_id:
+        channel = _bot_client.get_channel(channel_id)
+        if channel is not None:
+            try:
+                await channel.send(embed=_build_setups_embed(data))
+            except discord.HTTPException:
+                pass
+
+    return web.json_response({"ok": True})
+
+
 def build_app():
     app = web.Application()
     app.router.add_get("/", _handle_index)
     app.router.add_get("/api/leaderboard", _handle_leaderboard)
     app.router.add_get("/api/active", _handle_active)
     app.router.add_get("/api/matches", _handle_matches)
+    if SETUPS_ENABLED:
+        app.router.add_post("/setups-callback", _handle_setups_callback)
     return app
 
 
-async def start_web_server():
+async def start_web_server(bot=None):
     """Start the web server on the platform's PORT (Railway sets this)."""
+    global _bot_client
+    _bot_client = bot
     app = build_app()
     runner = web.AppRunner(app)
     await runner.setup()

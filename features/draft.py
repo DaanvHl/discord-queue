@@ -4,7 +4,7 @@ import random
 import discord
 
 from checks import ensure_queue_channel
-from config import MAPS
+from config import MAPS, SETUPS_ENABLED
 from db import get_player_name
 from state import active_matches, drafts, lobbies
 
@@ -19,11 +19,16 @@ def _teams_overview(team1, team2):
 def _ready_text(team1, team2, game_map):
     """The 'teams are complete, go play' announcement, shared by all pick methods."""
     map_line = f"\n🗺️ Map: **{game_map}**" if game_map else ""
-    return (
+    text = (
         f"🏆 **Teams are complete!**{map_line}\n\n{_teams_overview(team1, team2)}\n\n"
         f"🎮 **Good luck and have fun!**\n"
         f"When the game is over, a captain reports the result with `/result <winning team>`."
     )
+    if SETUPS_ENABLED:
+        text += (
+            "\n\n🛠️ Captains: run `/setups` to do the **Tanki pick & ban** for your loadouts."
+        )
+    return text
 
 
 def _register_match(key, captain1, captain2, team1, team2, game_map):
